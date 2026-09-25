@@ -11,10 +11,14 @@
 ## Required owner action before any real launch
 1. Back up existing Google AI Studio and GitHub project. Do not merge to main or change Cloud Run production before E2E testing.
 2. Create/select an authorized Firebase project. Enable Authentication > Email/Password and Google. Add your Cloud Run domain to Auth Authorized Domains.
-3. Create a Cloud Firestore database in your chosen region. Deploy the included `firestore.rules` (deny client access). Verify Cloud Run service account has Firestore document read/write rights through ADC.
+3. Reuse the existing Firestore database visible in the owner's Firebase screenshots. Do not create another database.
+   - The selected ID begins `f5403500-` but is truncated. Obtain the **exact complete database ID** before setting `FIRESTORE_DATABASE_ID` on staging Cloud Run. Do not assume `(default)`.
+   - Academy records are namespaced as `apps/maryam-academy/users/{uid}` and `apps/maryam-academy/progress/{uid}`, avoiding the unrelated AI Studio app's root collections.
+   - NEVER deploy `tests/firestore.emulator.rules` to the live Firebase project. The previous root deny-all rules file and default deployable firebase.json have been removed; the remaining `firebase.emulator.json` is only for isolated tests.
+   - Review all current rules before merging any new rules. Replacing existing database rules would disrupt the other application; broad existing allow rules may override a narrow deny. Verify Cloud Run service account permissions using ADC.
 4. From Firebase project settings > General > Your apps > Web app, provide VITE_FIREBASE_API_KEY, VITE_FIREBASE_AUTH_DOMAIN, VITE_FIREBASE_PROJECT_ID and VITE_FIREBASE_APP_ID at Vite BUILD TIME. These identify the public Firebase app and must match the backend project.
-5. Configure on Cloud Run server: FIREBASE_PROJECT_ID, Gemini API secret (GEMINI_API_KEY), and OWNER_UID (exact Firebase Authentication UID of the owner's real account). Do not use email or a frontend PIN as the owner privilege. Optionally set GEMINI_MODEL=gemini-2.5-flash.
-6. Install dependencies, run `npm run lint && npm run build && npm test`, then deploy a separate staging revision. `GET /api/health` should show configured = true. The test suite uses no real credentials and checks fail-closed behavior.
+5. Configure on staging Cloud Run server: FIREBASE_PROJECT_ID, FIRESTORE_DATABASE_ID (exact named database ID), Gemini API secret (GEMINI_API_KEY), and OWNER_UID (exact Firebase Authentication UID of the owner's real account). Do not use email or a frontend PIN as the owner privilege. Optionally set GEMINI_MODEL=gemini-2.5-flash.
+6. Install dependencies, run `npm run lint && npm run build && npm test && npm run test:emulator`, then deploy a separate staging revision. `GET /api/health` should show configured = true. The test suite uses no real credentials and checks fail-closed behavior.
 7. Register two **test accounts**, owner and student. Verify each person's progress survives logout/relogin, the second student cannot read the first user's information, student receives 403 for `/api/admin/summary`, and owner sees only actual user records. Test password-reset email and real Google login on Android. Test the AI endpoint with owner-approved consumption limits.
 8. Only after staging passes, merge and release. Check Cloud Run/Firebase current quotas and billing settings; free tier does not guarantee $0 for arbitrary usage.
 
@@ -26,3 +30,6 @@ Client only holds short-lived Firebase ID tokens; no password or owner PIN is sa
 
 ## Legacy workbook preservation
 Previous localStorage keys are not deleted or silently merged into the new account. After the owner signs into a verified owner UID, a consent-based button can import the old browser draft. Treat shared-device drafts with caution; confirm the data belongs to the owner before importing. Wait for the server save confirmation. Other old simulated accounts are not automatically promoted into Firebase users.
+
+## Existing-project observations and safety gate (2026-09-25)
+The screenshot shows a UUID-style named Firestore database, not an explicitly displayed default database. It is ready for data but the current rules, existing collections and real billing configuration must be inspected without mutation. This branch must not be merged or deployed to live Cloud Run until exact database ID and permissions are confirmed and staging has passed. Named Firestore Admin SDK APIs are currently listed as Public Preview; test the selected existing database on staging. Only one database in a project receives the Firestore free quota. Do not create a duplicate database just for this app.
