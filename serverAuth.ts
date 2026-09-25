@@ -125,6 +125,29 @@ export function installSecureApi(app: Express) {
     }
   });
 
+  // Owner-only, read-only connection diagnostic. Admin SDK bypasses Firestore rules;
+  // never report this probe as proof that client-side security rules are correct.
+  app.get("/api/admin/connection-check", async (req: AuthRequest, res) => {
+    if (!isOwner(req.verifiedUser!)) return clientError(res, 403, "غير مصرح.");
+    try {
+      const db = academyDb();
+      await db.listCollections(); // Metadata only. Never read or mutate user documents.
+      await getAuth().getUser(req.verifiedUser!.uid);
+      return res.json({
+        connected: true,
+        projectId: process.env.FIREBASE_PROJECT_ID,
+        databaseId: process.env.FIRESTORE_DATABASE_ID,
+        authVerified: true,
+        databaseReadableByServer: true,
+        securityRulesVerified: false,
+        note: "Admin SDK يتجاوز قواعد Firestore؛ يجب مراجعة القواعد بصورة منفصلة."
+      });
+    } catch (error: any) {
+      console.error("Owner connection check failed:", error?.code || error?.message);
+      return clientError(res, 503, "تعذر التحقق من الاتصال بالمشروع أو قاعدة البيانات.");
+    }
+  });
+
   app.get("/api/admin/summary", async (req: AuthRequest, res) => {
     if (!isOwner(req.verifiedUser!)) return clientError(res, 403, "غير مصرح.");
     try {
