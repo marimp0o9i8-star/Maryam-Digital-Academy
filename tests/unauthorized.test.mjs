@@ -8,7 +8,7 @@ const base = `http://127.0.0.1:${port}`;
 let server;
 test("public health; private endpoints fail closed without a verified session", async (t) => {
   server = spawn(process.execPath, ["dist/server.cjs"], {
-    env: { ...process.env, PORT: String(port), NODE_ENV: "production", FIREBASE_PROJECT_ID: "", OWNER_UID: "", GEMINI_API_KEY: "" },
+    env: { ...process.env, PORT: String(port), NODE_ENV: "production", FIREBASE_PROJECT_ID: "", FIRESTORE_DATABASE_ID: "", OWNER_UID: "", GEMINI_API_KEY: "" },
     stdio: "pipe",
   });
   t.after(() => { if (server && !server.killed) server.kill("SIGTERM"); });
