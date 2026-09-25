@@ -1,3 +1,4 @@
+import { authenticatedFetch } from "../lib/api";
 import React, { useState, useRef, useEffect } from "react";
 import { 
   Sparkles, 
@@ -87,7 +88,7 @@ export default function AIPersonalCoach({ answers, daysCompletedCount, onNavigat
     setLoading(true);
 
     try {
-      const response = await fetch("/api/coach/chat", {
+      const response = await authenticatedFetch("/api/coach/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -132,7 +133,7 @@ export default function AIPersonalCoach({ answers, daysCompletedCount, onNavigat
     }
 
     try {
-      const response = await fetch("/api/coach/chat", {
+      const response = await authenticatedFetch("/api/coach/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: prompt })
