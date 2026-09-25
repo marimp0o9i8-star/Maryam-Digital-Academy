@@ -1,3 +1,4 @@
+import { authenticatedFetch } from "../lib/api";
 import React, { useState, useEffect } from "react";
 import {
   Download,
@@ -999,13 +1000,9 @@ export default function AdminSuite({ answers, daysCompletedCount, onNavigateToPa
   const [pageViews, setPageViews] = useState<number>(() => {
     try {
       const saved = localStorage.getItem(LOCAL_STORAGE_KEY_VIEWS);
-      const current = saved ? Number(saved) : 184;
-      // Increment views slightly each load to simulate realistic visitor counts
-      const incremented = current + Math.floor(Math.random() * 3) + 1;
-      localStorage.setItem(LOCAL_STORAGE_KEY_VIEWS, String(incremented));
-      return incremented;
+      return saved ? Number(saved) : 0;
     } catch {
-      return 188;
+      return 0;
     }
   });
 
@@ -1358,7 +1355,7 @@ ${details.prompts.map((p, idx) => `الأمر ${idx + 1}:\n"${p}"`).join('\n\n')
         text: msg.text
       }));
 
-      const response = await fetch("/api/coach/chat", {
+      const response = await authenticatedFetch("/api/coach/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1449,7 +1446,7 @@ ${details.prompts.map((p, idx) => `الأمر ${idx + 1}:\n"${p}"`).join('\n\n')
     setTranslatedResult("");
 
     try {
-      const response = await fetch("/api/translate", {
+      const response = await authenticatedFetch("/api/translate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: transText, targetLanguage: transLang })
@@ -1562,7 +1559,7 @@ ${details.prompts.map((p, idx) => `الأمر ${idx + 1}:\n"${p}"`).join('\n\n')
     }
 
     try {
-      const response = await fetch("/api/ai-tool", {
+      const response = await authenticatedFetch("/api/ai-tool", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ toolId, inputData })
@@ -2022,7 +2019,7 @@ ${details.prompts.map((p, idx) => `الأمر ${idx + 1}:\n"${p}"`).join('\n\n')
         </button>
 
         <button
-          onClick={() => setActiveTab("affiliate")}
+          onClick={() => setActiveTab("ai_tools")} disabled title="غير مفعّل: لا تتوفر بيانات حقيقية أو تكامل مثبت بعد"
           className={`flex-1 text-center py-3.5 px-4 text-xs font-black rounded-xl transition duration-200 cursor-pointer min-w-[130px] flex items-center justify-center gap-2 ${
             activeTab === "affiliate"
               ? "bg-[#0b1d33] text-[#f2a900] shadow-md"
@@ -2034,7 +2031,7 @@ ${details.prompts.map((p, idx) => `الأمر ${idx + 1}:\n"${p}"`).join('\n\n')
         </button>
 
         <button
-          onClick={() => setActiveTab("analytics")}
+          onClick={() => setActiveTab("ai_tools")} disabled title="غير مفعّل: لا تتوفر بيانات حقيقية أو تكامل مثبت بعد"
           className={`flex-1 text-center py-3.5 px-4 text-xs font-black rounded-xl transition duration-200 cursor-pointer min-w-[130px] flex items-center justify-center gap-2 ${
             activeTab === "analytics"
               ? "bg-[#0b1d33] text-[#f2a900] shadow-md"
@@ -2046,7 +2043,7 @@ ${details.prompts.map((p, idx) => `الأمر ${idx + 1}:\n"${p}"`).join('\n\n')
         </button>
 
         <button
-          onClick={() => setActiveTab("payments")}
+          onClick={() => setActiveTab("ai_tools")} disabled title="غير مفعّل: لا تتوفر بيانات حقيقية أو تكامل مثبت بعد"
           className={`flex-1 text-center py-3.5 px-4 text-xs font-black rounded-xl transition duration-200 cursor-pointer min-w-[130px] flex items-center justify-center gap-2 ${
             activeTab === "payments"
               ? "bg-[#0b1d33] text-[#f2a900] shadow-md"
@@ -2070,7 +2067,7 @@ ${details.prompts.map((p, idx) => `الأمر ${idx + 1}:\n"${p}"`).join('\n\n')
         </button>
 
         <button
-          onClick={() => setActiveTab("users_admin" as any)}
+          onClick={() => setActiveTab("ai_tools")} disabled title="غير مفعّل: لا تتوفر بيانات حقيقية أو تكامل مثبت بعد"
           className={`flex-1 text-center py-3.5 px-4 text-xs font-black rounded-xl transition duration-200 cursor-pointer min-w-[130px] flex items-center justify-center gap-2 ${
             activeTab === "users_admin"
               ? "bg-[#0b1d33] text-[#f2a900] shadow-md"
