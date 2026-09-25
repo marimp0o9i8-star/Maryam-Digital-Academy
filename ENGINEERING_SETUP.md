@@ -23,3 +23,6 @@ The large legacy AdminSuite remains available to verified owner for authoring, b
 
 ## Persistence and threat model
 Client only holds short-lived Firebase ID tokens; no password or owner PIN is saved by this app. Cloud Run verifies tokens for each request; Firestore document paths use verified UID, never one supplied by the browser. Deny-all client rules prevent direct Firestore access even when public Firebase config is known. Owner privilege is based on server env UID. The current in-memory request limiter is per Cloud Run instance, not globally distributed; apply Cloud Armor or server-side distributed quota before public AI launch.
+
+## Legacy workbook preservation
+Previous localStorage keys are not deleted or silently merged into the new account. After the owner signs into a verified owner UID, a consent-based button can import the old browser draft. Treat shared-device drafts with caution; confirm the data belongs to the owner before importing. Wait for the server save confirmation. Other old simulated accounts are not automatically promoted into Firebase users.
