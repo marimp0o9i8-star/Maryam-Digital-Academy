@@ -10,7 +10,15 @@ const MAX_CALLS_PER_MINUTE = 30;
 function configured(): boolean { return !!process.env.FIREBASE_PROJECT_ID?.trim(); }
 function bootstrap() {
   if (!configured()) throw new Error("FIREBASE_PROJECT_ID is not configured.");
-  if (!getApps().length) initializeApp({ credential: applicationDefault(), projectId: process.env.FIREBASE_PROJECT_ID });
+  // Emulator tests use local unsigned tokens and never load production credentials.
+  // Never allow emulator endpoints in a production Cloud Run deployment.
+  const emulated = !!(process.env.FIREBASE_AUTH_EMULATOR_HOST || process.env.FIRESTORE_EMULATOR_HOST);
+  if (emulated && process.env.NODE_ENV === "production" && process.env.ALLOW_FIREBASE_EMULATORS_IN_CI !== "true") {
+    throw new Error("Firebase emulator configuration is forbidden in production.");
+  }
+  if (!getApps().length) initializeApp(emulated
+    ? { projectId: process.env.FIREBASE_PROJECT_ID }
+    : { credential: applicationDefault(), projectId: process.env.FIREBASE_PROJECT_ID });
 }
 function clientError(res: Response, code: number, message: string) { return res.status(code).json({ error: message }); }
 
@@ -49,6 +57,17 @@ export function installSecureApi(app: Express) {
     ok: true, firebaseConfigured: configured(), aiConfigured: !!process.env.GEMINI_API_KEY
   }));
   app.use("/api", requireUser);
+  // By default only the owner can incur AI charges. Explicitly enable public AI after
+  // setting provider quotas and a daily project budget.
+  app.use(["/api/coach/chat", "/api/translate", "/api/ai-tool"], (req: AuthRequest, res, next) => {
+    if (process.env.AI_PUBLIC_ENABLED !== "true" && !isOwner(req.verifiedUser!)) {
+      return clientError(res, 403, "أدوات الذكاء الاصطناعي غير مفعلة للحسابات العامة حالياً.");
+    }
+    if (!process.env.GEMINI_API_KEY?.trim()) {
+      return clientError(res, 503, "Gemini غير مفعّل على الخادم.");
+    }
+    return next();
+  });
 
   app.get("/api/me/progress", async (req: AuthRequest, res) => {
     try {
