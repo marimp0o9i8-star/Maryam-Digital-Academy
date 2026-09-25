@@ -367,16 +367,8 @@ Ensure it is extremely logical, professional, and creates huge immediate perceiv
     const aiOutput = response.text || "";
     return res.json({ aiOutput });
   } catch (error: any) {
-    console.error("AI Tool API error, resorting to high-quality fallback content:", error);
-    try {
-      const { toolId, inputData } = req.body;
-      const aiOutput = getFallbackContent(toolId, inputData);
-      return res.json({ aiOutput });
-    } catch (innerErr) {
-      return res.status(500).json({ 
-        error: error.message || "An unexpected error occurred in the Gemini AI Generator." 
-      });
-    }
+    console.error("AI Tool API error:", error);
+    return res.status(503).json({ error: "تعذّر توليد الرد الحقيقي من Gemini، يرجى المحاولة لاحقاً." });
   }
 });
 
