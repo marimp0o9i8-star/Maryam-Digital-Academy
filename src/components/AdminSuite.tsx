@@ -1672,7 +1672,7 @@ ${details.prompts.map((p, idx) => `الأمر ${idx + 1}:\n"${p}"`).join('\n\n')
 
   // PayPal Global Gateway State
   const [paypalClientId, setPaypalClientId] = useState(() => localStorage.getItem("paypal_client_id") || "pay_sandbox_client_id_7749826359");
-  const [paypalSecretKey, setPaypalSecretKey] = useState(() => localStorage.getItem("paypal_secret_key") || "pay_sandbox_secret_key_1120485967");
+  const [paypalSecretKey, setPaypalSecretKey] = useState("");
   const [paypalEnv, setPaypalEnv] = useState<"sandbox" | "live">(() => (localStorage.getItem("paypal_env") as any) || "sandbox");
   const [paypalSaveSuccess, setPaypalSaveSuccess] = useState(false);
   const [paypalSaving, setPaypalSaving] = useState(false);
@@ -1680,15 +1680,15 @@ ${details.prompts.map((p, idx) => `الأمر ${idx + 1}:\n"${p}"`).join('\n\n')
   // Mastercard Integration States
   const [mcCardMerchantId, setMcCardMerchantId] = useState(() => localStorage.getItem("mc_merchant_id") || "merch_mc_intl_88204");
   const [mcCardPublicKey, setMcCardPublicKey] = useState(() => localStorage.getItem("mc_public_key") || "pk_live_mc_8492048596");
-  const [mcCardSecretKey, setMcCardSecretKey] = useState(() => localStorage.getItem("mc_secret_key") || "sk_live_mc_2294859604");
+  const [mcCardSecretKey, setMcCardSecretKey] = useState("");
   const [mcCardEnv, setMcCardEnv] = useState<"sandbox" | "live">(() => (localStorage.getItem("mc_env") as any) || "live");
   const [mcCardSaveSuccess, setMcCardSaveSuccess] = useState(false);
   const [mcCardSaving, setMcCardSaving] = useState(false);
 
   // Zain Cash Integration States
   const [zainMSISDN, setZainMSISDN] = useState(() => localStorage.getItem("zain_msisdn") || "9647700000000");
-  const [zainSecretKey, setZainSecretKey] = useState(() => localStorage.getItem("zain_secret_key") || "zain_api_secret_77395960485");
-  const [zainMerchantPIN, setZainMerchantPIN] = useState(() => localStorage.getItem("zain_pin") || "1234");
+  const [zainSecretKey, setZainSecretKey] = useState("");
+  const [zainMerchantPIN, setZainMerchantPIN] = useState("");
   const [zainEnv, setZainEnv] = useState<"sandbox" | "live">(() => (localStorage.getItem("zain_env") as any) || "sandbox");
   const [zainSaveSuccess, setZainSaveSuccess] = useState(false);
   const [zainSaving, setZainSaving] = useState(false);
@@ -1841,7 +1841,7 @@ ${details.prompts.map((p, idx) => `الأمر ${idx + 1}:\n"${p}"`).join('\n\n')
     e.preventDefault();
     setPaypalSaving(true);
     localStorage.setItem("paypal_client_id", paypalClientId);
-    localStorage.setItem("paypal_secret_key", paypalSecretKey);
+    // Secret keys must be held and processed server-side, never persisted in browser storage.
     localStorage.setItem("paypal_env", paypalEnv);
     setTimeout(() => {
       setPaypalSaving(false);
@@ -1855,7 +1855,7 @@ ${details.prompts.map((p, idx) => `الأمر ${idx + 1}:\n"${p}"`).join('\n\n')
     setMcCardSaving(true);
     localStorage.setItem("mc_merchant_id", mcCardMerchantId);
     localStorage.setItem("mc_public_key", mcCardPublicKey);
-    localStorage.setItem("mc_secret_key", mcCardSecretKey);
+    // Secret keys must be held and processed server-side, never persisted in browser storage.
     localStorage.setItem("mc_env", mcCardEnv);
     setTimeout(() => {
       setMcCardSaving(false);
@@ -1868,8 +1868,8 @@ ${details.prompts.map((p, idx) => `الأمر ${idx + 1}:\n"${p}"`).join('\n\n')
     e.preventDefault();
     setZainSaving(true);
     localStorage.setItem("zain_msisdn", zainMSISDN);
-    localStorage.setItem("zain_secret_key", zainSecretKey);
-    localStorage.setItem("zain_pin", zainMerchantPIN);
+    // Secret keys must be held and processed server-side, never persisted in browser storage.
+    // Secret keys must be held and processed server-side, never persisted in browser storage.
     localStorage.setItem("zain_env", zainEnv);
     setTimeout(() => {
       setZainSaving(false);
@@ -3001,7 +3001,7 @@ ${details.prompts.map((p, idx) => `الأمر ${idx + 1}:\n"${p}"`).join('\n\n')
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
                       <div className="bg-indigo-50/70 p-2.5 rounded-xl border border-indigo-100 text-center">
                         <span className="text-[9px] text-slate-500 font-bold block">مؤشر الجدوى السوقية</span>
-                        <span className="text-xs font-black text-indigo-700">98.5% ممتاز 🌟</span>
+                        <span className="text-xs font-black text-indigo-700">غير مقاس — نموذج توضيحي</span>
                       </div>
                       <div className="bg-emerald-50/70 p-2.5 rounded-xl border border-emerald-100 text-center">
                         <span className="text-[9px] text-slate-500 font-bold block">متوسط سعر البيع المقترح</span>
