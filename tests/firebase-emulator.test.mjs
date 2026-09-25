@@ -99,7 +99,7 @@ test("Firebase Auth + Firestore emulator: real token verification, account isola
   assert.equal(reloaded.body.progress.answers.u1Problem, original.answers.u1Problem, "progress survives new token/relogin");
   const admin = await request("/api/admin/summary", owner);
   assert.equal(admin.status, 200, JSON.stringify(admin));
-  assert.equal(admin.body.profiles.length, 2, "only real profiles from two student progress requests");
+  assert.equal(admin.body.profiles.filter(p => ["student-one", "student-two"].includes(p.uid)).length, 2, "the two isolated API students are real database records, regardless of additional browser test fixtures");
   assert.equal(admin.body.profiles.some(p => p.uid === "student-one"), true);
   assert.equal(admin.body.profiles.some(p => p.uid === "student-two"), true);
   assert.equal(admin.body.profiles.some(p => p.uid === OWNER_UID), false, "owner not present until owner progress endpoint called");
