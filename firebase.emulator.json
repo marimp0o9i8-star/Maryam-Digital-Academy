@@ -1,7 +1,14 @@
 {
-  "firestore": {
-    "rules": "tests/firestore.emulator.rules"
-  },
+  "firestore": [
+    {
+      "database": "(default)",
+      "rules": "tests/firestore.emulator.rules"
+    },
+    {
+      "database": "academy-e2e",
+      "rules": "tests/firestore.emulator.rules"
+    }
+  ],
   "emulators": {
     "auth": {
       "host": "127.0.0.1",
