@@ -43,7 +43,7 @@ test("Firebase Auth + Firestore emulator: real token verification, account isola
   const server = spawn(process.execPath, ["dist/server.cjs"], {
     env: {
       ...process.env, PORT: "18309", NODE_ENV: "production",
-      FIREBASE_PROJECT_ID: PROJECT, FIRESTORE_DATABASE_ID: "(default)", OWNER_UID, GEMINI_API_KEY: "",
+      FIREBASE_PROJECT_ID: PROJECT, FIRESTORE_DATABASE_ID: "academy-e2e", OWNER_UID, GEMINI_API_KEY: "",
       AI_PUBLIC_ENABLED: "false", ALLOW_FIREBASE_EMULATORS_IN_CI: "true",
       FIREBASE_AUTH_EMULATOR_HOST: "127.0.0.1:9099",
       FIRESTORE_EMULATOR_HOST: "127.0.0.1:8085",
@@ -105,7 +105,7 @@ test("Firebase Auth + Firestore emulator: real token verification, account isola
   assert.equal(admin.body.profiles.some(p => p.uid === OWNER_UID), false, "owner not present until owner progress endpoint called");
 
   // Public browser token must never bypass deny-all Firestore security rules.
-  const direct = await fetch(`${FIRESTORE}/v1/projects/${PROJECT}/databases/(default)/documents/apps/maryam-academy/progress/student-one`, {
+  const direct = await fetch(`${FIRESTORE}/v1/projects/${PROJECT}/databases/academy-e2e/documents/apps/maryam-academy/progress/student-one`, {
     headers:{Authorization:`Bearer ${two}`}
   });
   assert.equal(direct.status, 403, "client read forbidden even when the student knows the document path");
