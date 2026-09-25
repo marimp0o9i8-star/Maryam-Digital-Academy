@@ -70,10 +70,13 @@ test("Firebase Auth + Firestore emulator: real token verification, account isola
   assert.equal((await request("/api/coach/chat", one, {method:"POST",body:JSON.stringify({message:"hello"})})).status, 403, "public AI is disabled by default");
   assert.equal((await request("/api/coach/chat", owner, {method:"POST",body:JSON.stringify({message:"hello"})})).status, 503, "owner AI fails closed without Gemini key");
 
-  const original = { answers: {u1Problem:"Problem unique to student one",u1Customer:"Iraqi shops",u1Check1:true}, daysCompleted:[true,...Array(11).fill(false)], currentPage:4 };
+  const original = { answers: {u1Problem:"Problem unique to student one",u1Customer:"Iraqi shops",u1Check1:true}, daysCompleted:[true,...Array(11).fill(false)], currentPage:4, revision:0 };
   const save = await request("/api/me/progress", one, {method:"PUT",body:JSON.stringify(original)});
   assert.equal(save.status, 200, JSON.stringify(save));
   assert.equal(save.body.saved, true);
+  assert.equal(save.body.revision, 1);
+  const stale = await request("/api/me/progress", one, {method:"PUT",body:JSON.stringify(original)});
+  assert.equal(stale.status, 409, "stale edit may not overwrite a newer committed draft");
   const loaded = await request("/api/me/progress", one);
   assert.equal(loaded.status, 200, JSON.stringify(loaded));
   assert.equal(loaded.body.progress.answers.u1Problem, original.answers.u1Problem);
