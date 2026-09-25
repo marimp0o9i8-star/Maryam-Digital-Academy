@@ -67,6 +67,7 @@ test("Firebase Auth + Firestore emulator: real token verification, account isola
   assert.equal((await request("/api/me/progress")).status, 401, "missing authorization");
   assert.equal((await request("/api/me/progress", "not-a-firebase-token")).status, 401, "invalid bearer token");
   assert.equal((await request("/api/admin/summary", one)).status, 403, "student cannot access owner API");
+  assert.equal((await request("/api/admin/connection-check", one)).status, 403, "student cannot inspect server database connection");
   assert.equal((await request("/api/coach/chat", one, {method:"POST",body:JSON.stringify({message:"hello"})})).status, 403, "public AI is disabled by default");
   assert.equal((await request("/api/coach/chat", owner, {method:"POST",body:JSON.stringify({message:"hello"})})).status, 503, "owner AI fails closed without Gemini key");
 
@@ -97,6 +98,11 @@ test("Firebase Auth + Firestore emulator: real token verification, account isola
   const newToken = await login("one@test.invalid"); // Simulate sign-out/relogin via new ID token.
   const reloaded = await request("/api/me/progress", newToken);
   assert.equal(reloaded.body.progress.answers.u1Problem, original.answers.u1Problem, "progress survives new token/relogin");
+  const connection = await request("/api/admin/connection-check", owner);
+  assert.equal(connection.status, 200, JSON.stringify(connection));
+  assert.equal(connection.body.databaseId, "academy-e2e");
+  assert.equal(connection.body.connected, true);
+  assert.equal(connection.body.securityRulesVerified, false, "admin SDK does not prove client rules");
   const admin = await request("/api/admin/summary", owner);
   assert.equal(admin.status, 200, JSON.stringify(admin));
   assert.equal(admin.body.profiles.filter(p => ["student-one", "student-two"].includes(p.uid)).length, 2, "the two isolated API students are real database records, regardless of additional browser test fixtures");
