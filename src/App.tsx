@@ -100,6 +100,30 @@ export default function App() {
   const [authError, setAuthError] = useState("");
   const [progressHydrated, setProgressHydrated] = useState(false);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [legacyAvailable, setLegacyAvailable] = useState(() => {
+    try { return Boolean(localStorage.getItem("digital_guide_answers_v1")); } catch { return false; }
+  });
+  const [importNotice, setImportNotice] = useState("");
+
+  const importLegacyOwnerDraft = () => {
+    if (!isAdminAuthenticated || !currentStudent?.uid || currentStudent.demo) return;
+    if (!window.confirm("استيراد مسودة هذا المتصفح القديمة إلى حساب المالكة الحالي؟ قد تكون من مستخدم آخر على الجهاز المشترك. لن نحذف النسخة القديمة.")) return;
+    try {
+      const raw = JSON.parse(localStorage.getItem("digital_guide_answers_v1") || "{}");
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("صيغة الإجابات القديمة غير صالحة");
+      const safe = Object.fromEntries(Object.entries(raw).filter(([key, value]) =>
+        Object.hasOwn(INITIAL_ANSWERS, key) && (typeof value === "string" || typeof value === "boolean")
+      ));
+      const previousDays = JSON.parse(localStorage.getItem("digital_guide_days_v1") || "null");
+      const oldPage = Number(localStorage.getItem("digital_guide_page_v1") || 1);
+      setAnswers({ ...INITIAL_ANSWERS, ...safe } as WorksheetAnswers);
+      if (Array.isArray(previousDays) && previousDays.length === 12 && previousDays.every((v: unknown) => typeof v === "boolean")) setDaysCompleted(previousDays);
+      if (Number.isInteger(oldPage) && oldPage >= 1 && oldPage <= 33) setCurrentPage(oldPage);
+      setImportNotice("تم تحميل المسودة القديمة إلى الواجهة؛ انتظري ظهور تأكيد الحفظ على الخادم.");
+      setLegacyAvailable(false);
+    } catch (error: any) { setImportNotice(error.message || "تعذر قراءة المسودة القديمة."); }
+  };
+
 
   useEffect(() => {
     if (!firebaseAuth) { setAuthLoading(false); return; }
@@ -629,6 +653,12 @@ export default function App() {
 
           {authLoading && <p role="status" className="p-4 bg-white rounded-lg">جارٍ التحقق من الجلسة واسترجاع تقدمك...</p>}
           {authError && <p role="alert" className="p-4 bg-red-50 text-red-800 rounded-lg">{authError}</p>}
+          {currentStudent && isAdminAuthenticated && legacyAvailable && (
+            <button type="button" onClick={importLegacyOwnerDraft} className="mb-3 p-2 rounded-xl border border-amber-300 bg-amber-50 text-amber-950 text-xs">
+              استيراد مسودة المتصفح القديمة إلى حساب المالكة (اختياري — النسخة القديمة محفوظة)
+            </button>
+          )}
+          {importNotice && <p role="status" className="mb-2 text-xs text-amber-800">{importNotice}</p>}
           {currentStudent && !currentStudent.demo && <p role="status" className="mb-2 text-xs text-slate-500">{saveState === "error" ? "تعذر الحفظ السحابي؛ لا تغلقي الصفحة قبل حل المشكلة." : saveState === "saving" ? "جارٍ حفظ تقدمك..." : saveState === "saved" ? "تم حفظ التقدم على الخادم." : ""}</p>}
           {currentStudent === null && activePanel !== "admin" && !authLoading ? (
             <StudentLogin onLoginSuccess={handleStudentLoginSuccess} lang={lang} />
