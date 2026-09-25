@@ -19,3 +19,9 @@ jobs:
       - run: npm run lint
       - run: npm run build
       - run: npm test
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Firebase Auth / Firestore isolated integration
+        run: npm run test:emulator
