@@ -12,7 +12,7 @@ test("Browser: register, workbook autosave, logout/relogin, account separation, 
   const processServer = spawn(process.execPath, ["dist/server.cjs"], {
     env: {
       ...process.env, PORT: "18310", NODE_ENV: "production",
-      FIREBASE_PROJECT_ID: "demo-maryam-academy", FIRESTORE_DATABASE_ID: "(default)", OWNER_UID: "owner-test-uid",
+      FIREBASE_PROJECT_ID: "demo-maryam-academy", FIRESTORE_DATABASE_ID: "academy-e2e", OWNER_UID: "owner-test-uid",
       GEMINI_API_KEY: "", AI_PUBLIC_ENABLED: "false",
       ALLOW_FIREBASE_EMULATORS_IN_CI: "true",
       FIREBASE_AUTH_EMULATOR_HOST: "127.0.0.1:9099",
