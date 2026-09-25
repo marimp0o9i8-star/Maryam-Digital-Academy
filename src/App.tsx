@@ -124,8 +124,9 @@ export default function App() {
         setProgressHydrated(true);
       } catch (error: any) {
         setCurrentStudent(null); setIsAdminAuthenticated(false);
-        setAuthError(error.message || "تعذر تحميل الحساب. لن نكتب فوق بياناتك.");
+        const message = error.message || "تعذر تحميل الحساب. لن نكتب فوق بياناتك.";
         await signOut(firebaseAuth).catch(() => {});
+        setAuthError(message);
       } finally { setAuthLoading(false); }
     });
     return () => unsubscribe();
