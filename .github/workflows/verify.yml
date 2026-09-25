@@ -4,6 +4,9 @@ on:
     branches: [fix/real-auth-storage-security-v1]
   pull_request:
     branches: [main]
+concurrency:
+  group: engineering-verify-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
@@ -23,5 +26,9 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/firebase/emulators
+          key: firebase-emulators-v1-${{ runner.os }}
       - name: Firebase Auth / Firestore isolated integration
         run: npm run test:emulator
