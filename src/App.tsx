@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { firebaseAuth, firebaseConfigured } from "./lib/firebase";
 import { apiJson } from "./lib/api";
@@ -100,6 +100,50 @@ export default function App() {
   const [authError, setAuthError] = useState("");
   const [progressHydrated, setProgressHydrated] = useState(false);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const revisionRef = useRef(0);
+  const savedSnapshotRef = useRef("");
+  const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const saveTimerRef = useRef<number | null>(null);
+  const syncConflictRef = useRef(false);
+  const authEpochRef = useRef(0);
+  const latestDraftRef = useRef<{ answers: WorksheetAnswers; daysCompleted: boolean[]; currentPage: number }>({
+    answers, daysCompleted, currentPage
+  });
+  latestDraftRef.current = { answers, daysCompleted, currentPage };
+
+  const saveProgressNow = async (uid: string, snapshot: { answers: WorksheetAnswers; daysCompleted: boolean[]; currentPage: number }) => {
+    const data = JSON.stringify(snapshot);
+    const task = saveQueueRef.current.catch(() => {}).then(async () => {
+      if (savedSnapshotRef.current === data) return;
+      if (syncConflictRef.current) throw new Error("هناك تعارض بين جلسات العمل؛ لن نستبدل المسودة دون مراجعة.");
+      const user = firebaseAuth?.currentUser;
+      if (!user || user.uid !== uid) throw new Error("تغيّر الحساب أثناء الحفظ؛ لم تُنقل بياناتك إلى حساب آخر.");
+      const token = await user.getIdToken();
+      if (firebaseAuth?.currentUser?.uid !== uid) throw new Error("تغيّر الحساب أثناء الحفظ.");
+      const response = await fetch("/api/me/progress", {
+        method: "PUT", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ ...snapshot, revision: revisionRef.current })
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        if (response.status === 409) syncConflictRef.current = true;
+        throw new Error(result.error || "تعذر الحفظ على الخادم.");
+      }
+      revisionRef.current = result.revision;
+      savedSnapshotRef.current = data;
+    });
+    saveQueueRef.current = task;
+    setSaveState("saving");
+    try {
+      await task;
+      if (firebaseAuth?.currentUser?.uid === uid) setSaveState("saved");
+    } catch (error: any) {
+      console.error("Progress save failed:", error);
+      setSaveState("error");
+      throw error;
+    }
+  };
+
   const [legacyAvailable, setLegacyAvailable] = useState(() => {
     try { return Boolean(localStorage.getItem("digital_guide_answers_v1")); } catch { return false; }
   });
@@ -128,6 +172,8 @@ export default function App() {
   useEffect(() => {
     if (!firebaseAuth) { setAuthLoading(false); return; }
     const unsubscribe = onAuthStateChanged(firebaseAuth, async (user) => {
+      const epoch = ++authEpochRef.current;
+      if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
       setProgressHydrated(false);
       setCurrentStudent(null);
       setIsAdminAuthenticated(false);
@@ -136,10 +182,19 @@ export default function App() {
       if (!user) {
         setCurrentStudent(null); setIsAdminAuthenticated(false);
         setAnswers(INITIAL_ANSWERS); setDaysCompleted(Array(12).fill(false)); setCurrentPage(1);
+        savedSnapshotRef.current = ""; revisionRef.current = 0; syncConflictRef.current = false;
         setAuthLoading(false); return;
       }
       try {
         const { progress, isOwner } = await apiJson<{ progress: any; isOwner: boolean }>("/api/me/progress");
+        if (epoch !== authEpochRef.current || firebaseAuth?.currentUser?.uid !== user.uid) return;
+        revisionRef.current = Number.isSafeInteger(progress?.revision) ? progress.revision : 0;
+        syncConflictRef.current = false;
+        savedSnapshotRef.current = JSON.stringify({
+          answers: progress?.answers ? { ...INITIAL_ANSWERS, ...progress.answers } : INITIAL_ANSWERS,
+          daysCompleted: Array.isArray(progress?.daysCompleted) && progress.daysCompleted.length === 12 ? progress.daysCompleted : Array(12).fill(false),
+          currentPage: Number.isInteger(progress?.currentPage) ? progress.currentPage : 1
+        });
         setAnswers(progress?.answers ? { ...INITIAL_ANSWERS, ...progress.answers } : INITIAL_ANSWERS);
         setDaysCompleted(Array.isArray(progress?.daysCompleted) && progress.daysCompleted.length === 12 ? progress.daysCompleted : Array(12).fill(false));
         setCurrentPage(Number.isInteger(progress?.currentPage) ? progress.currentPage : 1);
@@ -147,11 +202,14 @@ export default function App() {
         setIsAdminAuthenticated(isOwner === true);
         setProgressHydrated(true);
       } catch (error: any) {
+        if (epoch !== authEpochRef.current) return;
         setCurrentStudent(null); setIsAdminAuthenticated(false);
         const message = error.message || "تعذر تحميل الحساب. لن نكتب فوق بياناتك.";
         await signOut(firebaseAuth).catch(() => {});
         setAuthError(message);
-      } finally { setAuthLoading(false); }
+      } finally {
+        if (epoch === authEpochRef.current) setAuthLoading(false);
+      }
     });
     return () => unsubscribe();
   }, []);
@@ -169,6 +227,11 @@ export default function App() {
       setCurrentStudent(null); setAnswers(INITIAL_ANSWERS); setDaysCompleted(Array(12).fill(false));
       return;
     }
+    if (firebaseAuth && currentStudent?.uid && progressHydrated) {
+      if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
+      try { await saveProgressNow(currentStudent.uid, latestDraftRef.current); }
+      catch (error: any) { window.alert(error.message + " — بقيت الجلسة مفتوحة لحماية المسودة."); return; }
+    }
     if (firebaseAuth) await signOut(firebaseAuth);
   };
   const handleAdminLockSession = () => setActivePanel("dashboard");
@@ -178,14 +241,16 @@ export default function App() {
 
   const handleSetCurrentPage = (page: number) => setCurrentPage(page);
   useEffect(() => {
-    if (!currentStudent?.uid || currentStudent.demo || !progressHydrated) return;
-    setSaveState("saving");
-    const id = window.setTimeout(() => {
-      apiJson("/api/me/progress", { method: "PUT", body: JSON.stringify({ answers, daysCompleted, currentPage }) })
-        .then(() => setSaveState("saved"))
-        .catch(error => { console.error("Progress save failed:", error); setSaveState("error"); });
-    }, 1200);
-    return () => window.clearTimeout(id);
+    if (!currentStudent?.uid || currentStudent.demo || !progressHydrated || syncConflictRef.current) return;
+    if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
+    const uid = currentStudent.uid;
+    const snapshot = { answers, daysCompleted, currentPage };
+    saveTimerRef.current = window.setTimeout(() => {
+      void saveProgressNow(uid, snapshot).catch(() => {});
+    }, 900);
+    return () => {
+      if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
+    };
   }, [answers, daysCompleted, currentPage, currentStudent?.uid, progressHydrated]);
 
   // Day timeline completion toggle
