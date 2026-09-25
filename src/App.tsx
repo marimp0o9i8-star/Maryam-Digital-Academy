@@ -105,6 +105,8 @@ export default function App() {
     if (!firebaseAuth) { setAuthLoading(false); return; }
     const unsubscribe = onAuthStateChanged(firebaseAuth, async (user) => {
       setProgressHydrated(false);
+      setCurrentStudent(null);
+      setIsAdminAuthenticated(false);
       setAuthError("");
       setAuthLoading(true);
       if (!user) {
