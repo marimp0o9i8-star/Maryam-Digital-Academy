@@ -67,5 +67,16 @@ test("Browser: register, workbook autosave, logout/relogin, account separation, 
   assert.equal(await secondDraft.inputValue(), "", "second account cannot read first account workbook");
   await other.getByRole("button", {name:"لوحة التحكم المشرف والذكاء الفوقي"}).first().click();
   await other.getByText("لوحة المالكة محمية على الخادم", {exact:false}).waitFor({timeout:10000});
-  await one.close(); await two.close();
+  // Positive owner UI path: backend must have issued owner role from the verified UID.
+  const adminContext = await browser.newContext({viewport:{width:1365,height:900},locale:"ar-IQ"});
+  const adminPage = await adminContext.newPage();
+  await adminPage.goto(ROOT, {waitUntil:"networkidle"});
+  await adminPage.locator('input[autocomplete="email"]').fill("owner@test.invalid");
+  await adminPage.locator('input[autocomplete="current-password"]').fill("emulatorTestOnly-8492!");
+  await adminPage.getByRole("button", {name:"دخول",exact:true}).click();
+  await adminPage.getByRole("button", {name:"لوحة التحكم المشرف والذكاء الفوقي"}).first().click();
+  await adminPage.getByText("سجل الأعضاء الحقيقي — قراءة فقط").waitFor({timeout:12000});
+  await adminPage.getByText("student-one", {exact:false}).count(); // UID is never rendered; check names instead.
+  await adminPage.getByText("Student One", {exact:false}).first().waitFor({timeout:12000});
+  await one.close(); await two.close(); await adminContext.close();
 });
