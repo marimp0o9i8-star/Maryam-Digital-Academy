@@ -76,7 +76,6 @@ test("Browser: register, workbook autosave, logout/relogin, account separation, 
   await adminPage.getByRole("button", {name:"دخول",exact:true}).click();
   await adminPage.getByRole("button", {name:"لوحة التحكم المشرف والذكاء الفوقي"}).first().click();
   await adminPage.getByText("سجل الأعضاء الحقيقي — قراءة فقط").waitFor({timeout:12000});
-  await adminPage.getByText("student-one", {exact:false}).count(); // UID is never rendered; check names instead.
-  await adminPage.getByText("Student One", {exact:false}).first().waitFor({timeout:12000});
+  await adminPage.getByText("one@test.invalid", {exact:true}).first().waitFor({timeout:12000});
   await one.close(); await two.close(); await adminContext.close();
 });
