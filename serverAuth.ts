@@ -7,9 +7,18 @@ type AuthRequest = Request & { verifiedUser?: DecodedIdToken };
 const buckets = new Map<string, { start: number; count: number }>();
 const MAX_CALLS_PER_MINUTE = 30;
 
-function configured(): boolean { return !!process.env.FIREBASE_PROJECT_ID?.trim(); }
+function configured(): boolean { return !!process.env.FIREBASE_PROJECT_ID?.trim() && !!process.env.FIRESTORE_DATABASE_ID?.trim(); }
+function academyDb() {
+  // Never silently point a named-database app at (default), or an unrelated application's collections.
+  const id = process.env.FIRESTORE_DATABASE_ID?.trim();
+  if (!id) throw new Error("FIRESTORE_DATABASE_ID must be explicitly configured.");
+  bootstrap();
+  const app = getApps()[0];
+  return id === "(default)" ? getFirestore(app) : getFirestore(app, id);
+}
+const academyCollection = (name: "users" | "progress") => academyDb().collection("apps").doc("maryam-academy").collection(name);
 function bootstrap() {
-  if (!configured()) throw new Error("FIREBASE_PROJECT_ID is not configured.");
+  if (!configured()) throw new Error("FIREBASE_PROJECT_ID and FIRESTORE_DATABASE_ID must be configured.");
   // Emulator tests use local unsigned tokens and never load production credentials.
   // Never allow emulator endpoints in a production Cloud Run deployment.
   const emulated = !!(process.env.FIREBASE_AUTH_EMULATOR_HOST || process.env.FIRESTORE_EMULATOR_HOST);
@@ -72,14 +81,13 @@ export function installSecureApi(app: Express) {
   app.get("/api/me/progress", async (req: AuthRequest, res) => {
     try {
       const user = req.verifiedUser!;
-      const db = getFirestore();
-      const profile = db.collection("users").doc(user.uid);
+      const profile = academyCollection("users").doc(user.uid);
       await profile.set({
         name: user.name || user.email?.split("@")[0] || "",
         email: user.email || "",
         lastSeen: FieldValue.serverTimestamp(),
       }, { merge: true });
-      const snapshot = await db.collection("progress").doc(user.uid).get();
+      const snapshot = await academyCollection("progress").doc(user.uid).get();
       return res.json({ progress: snapshot.exists ? snapshot.data() : null, isOwner: isOwner(user) });
     } catch (e: any) {
       console.error("Load progress error:", e?.message);
@@ -99,8 +107,8 @@ export function installSecureApi(app: Express) {
       !Number.isSafeInteger(revision) || revision < 0)
       return clientError(res, 400, "بيانات التقدم غير صالحة.");
     try {
-      const doc = getFirestore().collection("progress").doc(req.verifiedUser!.uid);
-      const outcome = await getFirestore().runTransaction(async tx => {
+      const doc = academyCollection("progress").doc(req.verifiedUser!.uid);
+      const outcome = await academyDb().runTransaction(async tx => {
         const previous = await tx.get(doc);
         const currentRevision = previous.exists ? Number(previous.get("revision") || 0) : 0;
         if (currentRevision !== revision) return { conflict: true, currentRevision };
@@ -120,7 +128,7 @@ export function installSecureApi(app: Express) {
   app.get("/api/admin/summary", async (req: AuthRequest, res) => {
     if (!isOwner(req.verifiedUser!)) return clientError(res, 403, "غير مصرح.");
     try {
-      const snapshot = await getFirestore().collection("users").limit(100).get();
+      const snapshot = await academyCollection("users").limit(100).get();
       const profiles = snapshot.docs.map(doc => ({
         uid: doc.id, name: doc.get("name") || "", email: doc.get("email") || "",
         lastSeen: toDate(doc.get("lastSeen"))
