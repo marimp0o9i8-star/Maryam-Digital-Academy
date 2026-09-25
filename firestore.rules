@@ -1,9 +1,0 @@
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    // Access is exclusively through the authenticated server using firebase-admin.
-    match /{document=**} {
-      allow read, write: if false;
-    }
-  }
-}
