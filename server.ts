@@ -3,15 +3,17 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
+import { installSecureApi } from "./serverAuth";
 
 // Load environment variables for development
 dotenv.config();
 
 const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT || 8080);
 
 // Body parsing middleware
-app.use(express.json());
+app.use(express.json({ limit: "64kb" }));
+installSecureApi(app);
 
 /**
  * Lazy-initializer helper to get the GoogleGenAI instance safely without crashing on startup
@@ -171,7 +173,8 @@ function getFallbackContent(toolId: string, inputData: any): string {
 // ==========================================
 app.post("/api/translate", async (req, res) => {
   try {
-    const { text, targetLanguage } = req.body;
+    const { text, targetLanguage } = req.body || {};
+    if (typeof text !== "string" || text.length > 12000 || typeof targetLanguage !== "string" || targetLanguage.length > 50) return res.status(400).json({ error: "Invalid translation input." });
     if (!text || !targetLanguage) {
       return res.status(400).json({ error: "Missing 'text' or 'targetLanguage' inside request body." });
     }
@@ -179,13 +182,13 @@ app.post("/api/translate", async (req, res) => {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
       // Return beautiful fallback translation style
-      return res.json({ translatedText: `[ترجمة تجريبية عالية الموثوقية]: \n${text}` });
+      return res.status(503).json({ error: "خدمة الترجمة غير مفعلة: يرجى إعداد Gemini." });
     }
 
     const ai = getGeminiClient();
     
     const response = await ai.models.generateContent({
-      model: "gemini-3.8-flash",
+      model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
       contents: `Please act as a high-fidelity expert document translator. Translate the following text into physical, native, and extremely accurate ${targetLanguage}.
 Ensure to preserve formatting, line breaks, emojis, bullet points, numbers, HTML/Markdown tags, technical terms (such as Gumroad, TikTok, etc.), and original punctuation perfectly. 
 Do not add any preamble, translator notes, or extra comments—only output the direct translation.
@@ -212,15 +215,15 @@ ${text}`,
 // ==========================================
 app.post("/api/ai-tool", async (req, res) => {
   try {
-    const { toolId, inputData } = req.body;
+    const { toolId, inputData } = req.body || {};
+    if (typeof toolId !== "string" || toolId.length > 80 || !inputData || typeof inputData !== "object" || JSON.stringify(inputData).length > 12000) return res.status(400).json({ error: "Invalid AI tool input." });
     if (!toolId || !inputData) {
       return res.status(400).json({ error: "Missing 'toolId' or 'inputData' inside request body." });
     }
 
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
-      const aiOutput = getFallbackContent(toolId, inputData);
-      return res.json({ aiOutput });
+      return res.status(503).json({ error: "لم يتم إعداد Gemini؛ لم يُولّد محتوى فعلي." });
     }
 
     const ai = getGeminiClient();
@@ -353,7 +356,7 @@ Ensure it is extremely logical, professional, and creates huge immediate perceiv
     }
 
     const response = await ai.models.generateContent({
-      model: "gemini-3.8-flash",
+      model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
       contents: prompt,
       config: {
         systemInstruction,
@@ -364,16 +367,8 @@ Ensure it is extremely logical, professional, and creates huge immediate perceiv
     const aiOutput = response.text || "";
     return res.json({ aiOutput });
   } catch (error: any) {
-    console.error("AI Tool API error, resorting to high-quality fallback content:", error);
-    try {
-      const { toolId, inputData } = req.body;
-      const aiOutput = getFallbackContent(toolId, inputData);
-      return res.json({ aiOutput });
-    } catch (innerErr) {
-      return res.status(500).json({ 
-        error: error.message || "An unexpected error occurred in the Gemini AI Generator." 
-      });
-    }
+    console.error("AI Tool API error:", error);
+    return res.status(503).json({ error: "تعذّر توليد الرد الحقيقي من Gemini، يرجى المحاولة لاحقاً." });
   }
 });
 
@@ -546,8 +541,9 @@ function getCoachSmartFallback(message: string): string {
 
 app.post("/api/coach/chat", async (req, res) => {
   try {
-    const { message, history } = req.body;
-    if (!message) {
+    const { message, history } = req.body || {};
+    if (typeof message !== "string" || message.length > 4000 || (history && (!Array.isArray(history) || history.length > 10 || history.some((h: any) => typeof h?.text !== "string" || h.text.length > 4000)))) return res.status(400).json({ error: "Invalid coach message or history." });
+    if (!message.trim()) {
       return res.status(400).json({ error: "Missing 'message' inside request body." });
     }
 
@@ -593,7 +589,7 @@ app.post("/api/coach/chat", async (req, res) => {
       });
 
       const response = await ai.models.generateContent({
-        model: "gemini-3.8-flash",
+        model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
         contents: contents,
         config: {
           systemInstruction,
@@ -606,18 +602,16 @@ app.post("/api/coach/chat", async (req, res) => {
         return res.json({ reply });
       }
     } catch (genError: any) {
-      console.warn("Gemini API call bypassed or failed; engaging Master Coach Expert Fallback Engine:", genError.message || genError);
+      console.warn("Gemini API unavailable:", genError.message || genError);
     }
 
     // Seamless expert fallback engine with comprehensive course mastery
-    const fallbackReply = getCoachSmartFallback(message);
-    return res.json({ reply: fallbackReply });
+    return res.status(503).json({ error: "المستشار الذكي غير متاح حالياً؛ لم يُولّد رد من Gemini." });
 
   } catch (error: any) {
     console.error("AI Coach API error:", error);
     // Never leave the user without an answer
-    const fallbackReply = getCoachSmartFallback(req.body?.message || "");
-    return res.json({ reply: fallbackReply });
+    return res.status(500).json({ error: "تعذر معالجة رسالة المستشار." });
   }
 });
 

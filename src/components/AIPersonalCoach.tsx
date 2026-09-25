@@ -1,3 +1,4 @@
+import { authenticatedFetch } from "../lib/api";
 import React, { useState, useRef, useEffect } from "react";
 import { 
   Sparkles, 
@@ -87,7 +88,7 @@ export default function AIPersonalCoach({ answers, daysCompletedCount, onNavigat
     setLoading(true);
 
     try {
-      const response = await fetch("/api/coach/chat", {
+      const response = await authenticatedFetch("/api/coach/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -132,7 +133,7 @@ export default function AIPersonalCoach({ answers, daysCompletedCount, onNavigat
     }
 
     try {
-      const response = await fetch("/api/coach/chat", {
+      const response = await authenticatedFetch("/api/coach/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: prompt })
@@ -191,7 +192,7 @@ export default function AIPersonalCoach({ answers, daysCompletedCount, onNavigat
       block5: "I worry no one will buy (No audience) 💥",
       coachRecipe: "⚡ Target Catalyst Prescription from Coach:",
       generating: "Consulting Gemini AI networks for your customized catalyst...",
-      chatTitle: "💬 Interactive Passive Income Niche Mentor (Gemini 3.5)",
+      chatTitle: "💬 Interactive Passive Income Niche Mentor (Gemini)",
       chatPlaceholder: "Ask me anything about product writing, pricing, marketing, or overcoming your doubts...",
       termsWarning: "🚨 Niche Shield: This AI is highly optimized to answer ONLY digital product, passive income, and book writing queries. Off-topic questions will be bypassed to keep your launch trajectory locked."
     }
@@ -377,7 +378,7 @@ export default function AIPersonalCoach({ answers, daysCompletedCount, onNavigat
           <div className="flex items-center gap-2">
             <span className="w-2.5 h-2.5 bg-emerald-500 rounded-full animate-ping" />
             <span className="text-[10px] bg-emerald-500/10 text-emerald-400 font-extrabold tracking-wide px-2 py-0.5 rounded-md uppercase font-mono">
-              GEMINI PRO v3.5
+              Gemini — وفق إعداد الخادم
             </span>
           </div>
           <div className="text-right">

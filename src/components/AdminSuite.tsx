@@ -1,3 +1,4 @@
+import { authenticatedFetch } from "../lib/api";
 import React, { useState, useEffect } from "react";
 import {
   Download,
@@ -999,13 +1000,9 @@ export default function AdminSuite({ answers, daysCompletedCount, onNavigateToPa
   const [pageViews, setPageViews] = useState<number>(() => {
     try {
       const saved = localStorage.getItem(LOCAL_STORAGE_KEY_VIEWS);
-      const current = saved ? Number(saved) : 184;
-      // Increment views slightly each load to simulate realistic visitor counts
-      const incremented = current + Math.floor(Math.random() * 3) + 1;
-      localStorage.setItem(LOCAL_STORAGE_KEY_VIEWS, String(incremented));
-      return incremented;
+      return saved ? Number(saved) : 0;
     } catch {
-      return 188;
+      return 0;
     }
   });
 
@@ -1358,7 +1355,7 @@ ${details.prompts.map((p, idx) => `الأمر ${idx + 1}:\n"${p}"`).join('\n\n')
         text: msg.text
       }));
 
-      const response = await fetch("/api/coach/chat", {
+      const response = await authenticatedFetch("/api/coach/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1449,7 +1446,7 @@ ${details.prompts.map((p, idx) => `الأمر ${idx + 1}:\n"${p}"`).join('\n\n')
     setTranslatedResult("");
 
     try {
-      const response = await fetch("/api/translate", {
+      const response = await authenticatedFetch("/api/translate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: transText, targetLanguage: transLang })
@@ -1562,7 +1559,7 @@ ${details.prompts.map((p, idx) => `الأمر ${idx + 1}:\n"${p}"`).join('\n\n')
     }
 
     try {
-      const response = await fetch("/api/ai-tool", {
+      const response = await authenticatedFetch("/api/ai-tool", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ toolId, inputData })
@@ -1675,7 +1672,7 @@ ${details.prompts.map((p, idx) => `الأمر ${idx + 1}:\n"${p}"`).join('\n\n')
 
   // PayPal Global Gateway State
   const [paypalClientId, setPaypalClientId] = useState(() => localStorage.getItem("paypal_client_id") || "pay_sandbox_client_id_7749826359");
-  const [paypalSecretKey, setPaypalSecretKey] = useState(() => localStorage.getItem("paypal_secret_key") || "pay_sandbox_secret_key_1120485967");
+  const [paypalSecretKey, setPaypalSecretKey] = useState("");
   const [paypalEnv, setPaypalEnv] = useState<"sandbox" | "live">(() => (localStorage.getItem("paypal_env") as any) || "sandbox");
   const [paypalSaveSuccess, setPaypalSaveSuccess] = useState(false);
   const [paypalSaving, setPaypalSaving] = useState(false);
@@ -1683,15 +1680,15 @@ ${details.prompts.map((p, idx) => `الأمر ${idx + 1}:\n"${p}"`).join('\n\n')
   // Mastercard Integration States
   const [mcCardMerchantId, setMcCardMerchantId] = useState(() => localStorage.getItem("mc_merchant_id") || "merch_mc_intl_88204");
   const [mcCardPublicKey, setMcCardPublicKey] = useState(() => localStorage.getItem("mc_public_key") || "pk_live_mc_8492048596");
-  const [mcCardSecretKey, setMcCardSecretKey] = useState(() => localStorage.getItem("mc_secret_key") || "sk_live_mc_2294859604");
+  const [mcCardSecretKey, setMcCardSecretKey] = useState("");
   const [mcCardEnv, setMcCardEnv] = useState<"sandbox" | "live">(() => (localStorage.getItem("mc_env") as any) || "live");
   const [mcCardSaveSuccess, setMcCardSaveSuccess] = useState(false);
   const [mcCardSaving, setMcCardSaving] = useState(false);
 
   // Zain Cash Integration States
   const [zainMSISDN, setZainMSISDN] = useState(() => localStorage.getItem("zain_msisdn") || "9647700000000");
-  const [zainSecretKey, setZainSecretKey] = useState(() => localStorage.getItem("zain_secret_key") || "zain_api_secret_77395960485");
-  const [zainMerchantPIN, setZainMerchantPIN] = useState(() => localStorage.getItem("zain_pin") || "1234");
+  const [zainSecretKey, setZainSecretKey] = useState("");
+  const [zainMerchantPIN, setZainMerchantPIN] = useState("");
   const [zainEnv, setZainEnv] = useState<"sandbox" | "live">(() => (localStorage.getItem("zain_env") as any) || "sandbox");
   const [zainSaveSuccess, setZainSaveSuccess] = useState(false);
   const [zainSaving, setZainSaving] = useState(false);
@@ -1844,7 +1841,7 @@ ${details.prompts.map((p, idx) => `الأمر ${idx + 1}:\n"${p}"`).join('\n\n')
     e.preventDefault();
     setPaypalSaving(true);
     localStorage.setItem("paypal_client_id", paypalClientId);
-    localStorage.setItem("paypal_secret_key", paypalSecretKey);
+    // Secret keys must be held and processed server-side, never persisted in browser storage.
     localStorage.setItem("paypal_env", paypalEnv);
     setTimeout(() => {
       setPaypalSaving(false);
@@ -1858,7 +1855,7 @@ ${details.prompts.map((p, idx) => `الأمر ${idx + 1}:\n"${p}"`).join('\n\n')
     setMcCardSaving(true);
     localStorage.setItem("mc_merchant_id", mcCardMerchantId);
     localStorage.setItem("mc_public_key", mcCardPublicKey);
-    localStorage.setItem("mc_secret_key", mcCardSecretKey);
+    // Secret keys must be held and processed server-side, never persisted in browser storage.
     localStorage.setItem("mc_env", mcCardEnv);
     setTimeout(() => {
       setMcCardSaving(false);
@@ -1871,8 +1868,8 @@ ${details.prompts.map((p, idx) => `الأمر ${idx + 1}:\n"${p}"`).join('\n\n')
     e.preventDefault();
     setZainSaving(true);
     localStorage.setItem("zain_msisdn", zainMSISDN);
-    localStorage.setItem("zain_secret_key", zainSecretKey);
-    localStorage.setItem("zain_pin", zainMerchantPIN);
+    // Secret keys must be held and processed server-side, never persisted in browser storage.
+    // Secret keys must be held and processed server-side, never persisted in browser storage.
     localStorage.setItem("zain_env", zainEnv);
     setTimeout(() => {
       setZainSaving(false);
@@ -2022,7 +2019,7 @@ ${details.prompts.map((p, idx) => `الأمر ${idx + 1}:\n"${p}"`).join('\n\n')
         </button>
 
         <button
-          onClick={() => setActiveTab("affiliate")}
+          onClick={() => setActiveTab("ai_tools")} disabled title="غير مفعّل: لا تتوفر بيانات حقيقية أو تكامل مثبت بعد"
           className={`flex-1 text-center py-3.5 px-4 text-xs font-black rounded-xl transition duration-200 cursor-pointer min-w-[130px] flex items-center justify-center gap-2 ${
             activeTab === "affiliate"
               ? "bg-[#0b1d33] text-[#f2a900] shadow-md"
@@ -2034,7 +2031,7 @@ ${details.prompts.map((p, idx) => `الأمر ${idx + 1}:\n"${p}"`).join('\n\n')
         </button>
 
         <button
-          onClick={() => setActiveTab("analytics")}
+          onClick={() => setActiveTab("ai_tools")} disabled title="غير مفعّل: لا تتوفر بيانات حقيقية أو تكامل مثبت بعد"
           className={`flex-1 text-center py-3.5 px-4 text-xs font-black rounded-xl transition duration-200 cursor-pointer min-w-[130px] flex items-center justify-center gap-2 ${
             activeTab === "analytics"
               ? "bg-[#0b1d33] text-[#f2a900] shadow-md"
@@ -2046,7 +2043,7 @@ ${details.prompts.map((p, idx) => `الأمر ${idx + 1}:\n"${p}"`).join('\n\n')
         </button>
 
         <button
-          onClick={() => setActiveTab("payments")}
+          onClick={() => setActiveTab("ai_tools")} disabled title="غير مفعّل: لا تتوفر بيانات حقيقية أو تكامل مثبت بعد"
           className={`flex-1 text-center py-3.5 px-4 text-xs font-black rounded-xl transition duration-200 cursor-pointer min-w-[130px] flex items-center justify-center gap-2 ${
             activeTab === "payments"
               ? "bg-[#0b1d33] text-[#f2a900] shadow-md"
@@ -2070,7 +2067,7 @@ ${details.prompts.map((p, idx) => `الأمر ${idx + 1}:\n"${p}"`).join('\n\n')
         </button>
 
         <button
-          onClick={() => setActiveTab("users_admin" as any)}
+          onClick={() => setActiveTab("ai_tools")} disabled title="غير مفعّل: لا تتوفر بيانات حقيقية أو تكامل مثبت بعد"
           className={`flex-1 text-center py-3.5 px-4 text-xs font-black rounded-xl transition duration-200 cursor-pointer min-w-[130px] flex items-center justify-center gap-2 ${
             activeTab === "users_admin"
               ? "bg-[#0b1d33] text-[#f2a900] shadow-md"
@@ -3004,7 +3001,7 @@ ${details.prompts.map((p, idx) => `الأمر ${idx + 1}:\n"${p}"`).join('\n\n')
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
                       <div className="bg-indigo-50/70 p-2.5 rounded-xl border border-indigo-100 text-center">
                         <span className="text-[9px] text-slate-500 font-bold block">مؤشر الجدوى السوقية</span>
-                        <span className="text-xs font-black text-indigo-700">98.5% ممتاز 🌟</span>
+                        <span className="text-xs font-black text-indigo-700">غير مقاس — نموذج توضيحي</span>
                       </div>
                       <div className="bg-emerald-50/70 p-2.5 rounded-xl border border-emerald-100 text-center">
                         <span className="text-[9px] text-slate-500 font-bold block">متوسط سعر البيع المقترح</span>

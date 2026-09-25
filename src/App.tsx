@@ -1,4 +1,8 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
+import { onAuthStateChanged, signOut } from "firebase/auth";
+import { firebaseAuth, firebaseConfigured } from "./lib/firebase";
+import { apiJson } from "./lib/api";
+import AdminOverview from "./components/AdminOverview";
 import {
   Home,
   BookOpen,
@@ -30,9 +34,6 @@ import { METADATA_TRANSLATIONS } from "./utils/translations";
 import { Lock, LogOut, User } from "lucide-react";
 import StudentLogin from "./components/StudentLogin";
 
-const LOCAL_STORAGE_KEY_ANSWERS = "digital_guide_answers_v1";
-const LOCAL_STORAGE_KEY_DAYS = "digital_guide_days_v1";
-const LOCAL_STORAGE_KEY_PAGE = "digital_guide_page_v1";
 
 const INITIAL_ANSWERS: WorksheetAnswers = {
   u1Problem: "",
@@ -75,43 +76,14 @@ export default function App() {
   const [activePanel, setActivePanel] = useState<string>("dashboard");
 
   // AI Retention Notification state
-  const [showAiNotification, setShowAiNotification] = useState<boolean>(true);
+  const [showAiNotification, setShowAiNotification] = useState<boolean>(false);
   const [expandedAiNotification, setExpandedAiNotification] = useState<boolean>(false);
 
   // Page index state
   const [currentPage, setCurrentPage] = useState<number>(1);
 
-  // Answers State pre-loaded from localStorage
-  const [answers, setAnswers] = useState<WorksheetAnswers>(() => {
-    try {
-      const saved = localStorage.getItem(LOCAL_STORAGE_KEY_ANSWERS);
-      return saved ? JSON.parse(saved) : INITIAL_ANSWERS;
-    } catch {
-      return INITIAL_ANSWERS;
-    }
-  });
-
-  // 12-Day challenge state pre-loaded from localStorage
-  const [daysCompleted, setDaysCompleted] = useState<boolean[]>(() => {
-    try {
-      const saved = localStorage.getItem(LOCAL_STORAGE_KEY_DAYS);
-      return saved ? JSON.parse(saved) : Array(12).fill(false);
-    } catch {
-      return Array(12).fill(false);
-    }
-  });
-
-  // Load current reading page
-  useEffect(() => {
-    try {
-      const savedPage = localStorage.getItem(LOCAL_STORAGE_KEY_PAGE);
-      if (savedPage) {
-        setCurrentPage(Number(savedPage));
-      }
-    } catch (e) {
-      console.warn("Could not load current page from localStorage", e);
-    }
-  }, []);
+  const [answers, setAnswers] = useState<WorksheetAnswers>(INITIAL_ANSWERS);
+  const [daysCompleted, setDaysCompleted] = useState<boolean[]>(Array(12).fill(false));
 
   // Global Language state (ar, en, fr, es, tr)
   const [lang, setLang] = useState<string>(() => {
@@ -122,200 +94,167 @@ export default function App() {
     localStorage.setItem("digital_guide_lang_v1", lang);
   }, [lang]);
 
-  // Student authentication and persistent session state
-  const [currentStudent, setCurrentStudent] = useState<any>(() => {
-    try {
-      const saved = localStorage.getItem("digital_guide_current_student_v1");
-      if (saved) return JSON.parse(saved);
-    } catch {}
-    return null;
+  const [currentStudent, setCurrentStudent] = useState<any>(null);
+  const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
+  const [authLoading, setAuthLoading] = useState(firebaseConfigured);
+  const [authError, setAuthError] = useState("");
+  const [progressHydrated, setProgressHydrated] = useState(false);
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const revisionRef = useRef(0);
+  const savedSnapshotRef = useRef("");
+  const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const saveTimerRef = useRef<number | null>(null);
+  const syncConflictRef = useRef(false);
+  const authEpochRef = useRef(0);
+  const latestDraftRef = useRef<{ answers: WorksheetAnswers; daysCompleted: boolean[]; currentPage: number }>({
+    answers, daysCompleted, currentPage
   });
+  latestDraftRef.current = { answers, daysCompleted, currentPage };
 
-  const logStudentActivity = (actionText: string) => {
-    try {
-      const savedStudent = localStorage.getItem("digital_guide_current_student_v1");
-      if (savedStudent) {
-        const student = JSON.parse(savedStudent);
-        if (!student.activities) student.activities = [];
-        
-        const now = new Date();
-        const timeStr = now.toLocaleTimeString("ar-EG", { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-        const entry = `${timeStr}: ${actionText}`;
-        
-        student.activities = [entry, ...student.activities].slice(0, 50);
-        student.lastAction = actionText;
-        student.lastActive = "للتو";
-        
-        localStorage.setItem("digital_guide_current_student_v1", JSON.stringify(student));
-        setCurrentStudent(student);
-
-        const savedUsers = localStorage.getItem("digital_guide_simulated_users_v1");
-        if (savedUsers) {
-          const users = JSON.parse(savedUsers);
-          const idx = users.findIndex((u: any) => u.email.toLowerCase() === student.email.toLowerCase());
-          if (idx !== -1) {
-            users[idx] = {
-              ...users[idx],
-              lastAction: actionText,
-              lastActive: "للتو",
-              activities: [entry, ...(users[idx].activities || [])].slice(0, 50),
-              progress: student.progress || users[idx].progress
-            };
-          } else {
-            users.unshift({
-              id: Date.now(),
-              name: student.name,
-              email: student.email,
-              role: student.phone ? "عضوية جوال مؤكدة 📱" : "طالب نشط بالمنصة 🌟",
-              progress: student.progress || "20%",
-              status: "نشط",
-              tier: student.tier || "Silver Tier",
-              phone: student.phone,
-              ip: student.ip || "127.0.0.1",
-              browser: student.browser || "Chrome / Windows",
-              lastAction: actionText,
-              lastActive: "للتو",
-              activities: [entry]
-            });
-          }
-          localStorage.setItem("digital_guide_simulated_users_v1", JSON.stringify(users));
-        }
+  const saveProgressNow = async (uid: string, snapshot: { answers: WorksheetAnswers; daysCompleted: boolean[]; currentPage: number }) => {
+    const data = JSON.stringify(snapshot);
+    const ownerEpoch = authEpochRef.current;
+    const task = saveQueueRef.current.catch(() => {}).then(async () => {
+      if (savedSnapshotRef.current === data) return;
+      if (syncConflictRef.current) throw new Error("هناك تعارض بين جلسات العمل؛ لن نستبدل المسودة دون مراجعة.");
+      const user = firebaseAuth?.currentUser;
+      if (!user || user.uid !== uid) throw new Error("تغيّر الحساب أثناء الحفظ؛ لم تُنقل بياناتك إلى حساب آخر.");
+      const token = await user.getIdToken();
+      if (firebaseAuth?.currentUser?.uid !== uid) throw new Error("تغيّر الحساب أثناء الحفظ.");
+      const response = await fetch("/api/me/progress", {
+        method: "PUT", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ ...snapshot, revision: revisionRef.current })
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        if (response.status === 409) syncConflictRef.current = true;
+        throw new Error(result.error || "تعذر الحفظ على الخادم.");
       }
-    } catch (e) {
-      console.warn("Failed to log activity", e);
+      if (ownerEpoch === authEpochRef.current && firebaseAuth?.currentUser?.uid === uid) {
+        revisionRef.current = result.revision;
+        savedSnapshotRef.current = data;
+      }
+    });
+    saveQueueRef.current = task;
+    if (ownerEpoch === authEpochRef.current) setSaveState("saving");
+    try {
+      await task;
+      if (firebaseAuth?.currentUser?.uid === uid) setSaveState("saved");
+    } catch (error: any) {
+      console.error("Progress save failed:", error);
+      if (ownerEpoch === authEpochRef.current) setSaveState("error");
+      throw error;
     }
   };
 
-  const handleStudentLoginSuccess = (studentData: any) => {
+  const [legacyAvailable, setLegacyAvailable] = useState(() => {
+    try { return Boolean(localStorage.getItem("digital_guide_answers_v1")); } catch { return false; }
+  });
+  const [importNotice, setImportNotice] = useState("");
+
+  const importLegacyOwnerDraft = () => {
+    if (!isAdminAuthenticated || !currentStudent?.uid || currentStudent.demo) return;
+    if (!window.confirm("استيراد مسودة هذا المتصفح القديمة إلى حساب المالكة الحالي؟ قد تكون من مستخدم آخر على الجهاز المشترك. لن نحذف النسخة القديمة.")) return;
     try {
-      localStorage.setItem("digital_guide_current_student_v1", JSON.stringify(studentData));
-      
-      const savedUsers = localStorage.getItem("digital_guide_simulated_users_v1");
-      const users = savedUsers ? JSON.parse(savedUsers) : [
-        { id: 1, name: "مريم ناهي حسن", email: "marimp0o9i8@gmail.com", role: "مؤلفة الدليل والمؤسسة 👑", progress: "92%", status: "نشط", tier: "VIP Gold" },
-        { id: 2, name: "علاء جاسم حمزة", email: "alaa.jassim@gmail.com", role: "طالب منجز 🚀", progress: "85%", status: "نشط", tier: "Silver" },
-        { id: 3, name: "سارة قتيبة الملا", email: "sara.q@outlook.com", role: "طالبة مبادرة 📝", progress: "30%", status: "نشط", tier: "Bronze" },
-        { id: 4, name: "أحمد بن عبد الله العتيبي", email: "ahmed.otb@gmail.com", role: "طالب منجز 🚀", progress: "70%", status: "نشط", tier: "Silver" },
-        { id: 5, name: "ريما الشمري", email: "reema.sh@gmail.com", role: "طالبة متوقفة ⏳", progress: "15%", status: "مجمّد", tier: "Bronze" }
-      ];
-
-      const idx = users.findIndex((u: any) => u.email.toLowerCase() === studentData.email.toLowerCase());
-      const now = new Date();
-      const timeStr = now.toLocaleTimeString("ar-EG", { hour: '2-digit', minute: '2-digit' });
-      const mainActivity = `تسجيل الدخول للمنصة بواسطة ${studentData.loginMethod} في تمام الساعة ${timeStr}`;
-      
-      if (idx !== -1) {
-        users[idx] = {
-          ...users[idx],
-          lastAction: "تسجيل الدخول",
-          lastActive: "للتو",
-          activities: [mainActivity, ...(users[idx].activities || [])].slice(0, 50)
-        };
-      } else {
-        users.unshift({
-          id: Date.now(),
-          name: studentData.name,
-          email: studentData.email,
-          role: studentData.phone ? "عضوية جوال مؤكدة 📱" : "طالب نشط بالمنصة 🌟",
-          progress: studentData.progress || "15%",
-          status: "نشط",
-          tier: studentData.tier || "Silver Tier",
-          phone: studentData.phone,
-          ip: studentData.ip,
-          browser: studentData.browser,
-          lastAction: "تسجيل الدخول",
-          lastActive: "للتو",
-          activities: [mainActivity]
-        });
-      }
-
-      localStorage.setItem("digital_guide_simulated_users_v1", JSON.stringify(users));
-      setCurrentStudent(studentData);
-    } catch (e) {
-      console.error(e);
-    }
+      const raw = JSON.parse(localStorage.getItem("digital_guide_answers_v1") || "{}");
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("صيغة الإجابات القديمة غير صالحة");
+      const safe = Object.fromEntries(Object.entries(raw).filter(([key, value]) =>
+        Object.hasOwn(INITIAL_ANSWERS, key) && (typeof value === "string" || typeof value === "boolean")
+      ));
+      const previousDays = JSON.parse(localStorage.getItem("digital_guide_days_v1") || "null");
+      const oldPage = Number(localStorage.getItem("digital_guide_page_v1") || 1);
+      setAnswers({ ...INITIAL_ANSWERS, ...safe } as WorksheetAnswers);
+      if (Array.isArray(previousDays) && previousDays.length === 12 && previousDays.every((v: unknown) => typeof v === "boolean")) setDaysCompleted(previousDays);
+      if (Number.isInteger(oldPage) && oldPage >= 1 && oldPage <= 33) setCurrentPage(oldPage);
+      setImportNotice("تم تحميل المسودة القديمة إلى الواجهة؛ انتظري ظهور تأكيد الحفظ على الخادم.");
+      setLegacyAvailable(false);
+    } catch (error: any) { setImportNotice(error.message || "تعذر قراءة المسودة القديمة."); }
   };
 
-  const handleStudentLogout = () => {
-    try {
-      logStudentActivity("تسجيل الخروج من المنصة");
-      localStorage.removeItem("digital_guide_current_student_v1");
+
+  useEffect(() => {
+    if (!firebaseAuth) { setAuthLoading(false); return; }
+    const unsubscribe = onAuthStateChanged(firebaseAuth, async (user) => {
+      const epoch = ++authEpochRef.current;
+      if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
+      setProgressHydrated(false);
       setCurrentStudent(null);
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  // Secure Admin Gate States (Locked exclusively to marimp0o9i8@gmail.com with PIN 2026)
-  const [isAdminAuthenticated, setIsAdminAuthenticated] = useState<boolean>(() => {
-    return localStorage.getItem("digital_guide_admin_auth_v1") === "true";
-  });
-
-  const [adminEmailInput, setAdminEmailInput] = useState("");
-  const [adminPinInput, setAdminPinInput] = useState("");
-  const [adminChecking, setAdminChecking] = useState(false);
-  const [adminError, setAdminError] = useState<string | null>(null);
-
-  const handleAdminUnlockSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setAdminChecking(true);
-    setAdminError(null);
-
-    setTimeout(() => {
-      const cleanEmail = adminEmailInput.trim().toLowerCase();
-      const cleanPin = adminPinInput.trim();
-
-      if (cleanEmail === "marimp0o9i8@gmail.com" && cleanPin === "2026") {
-        setIsAdminAuthenticated(true);
-        localStorage.setItem("digital_guide_admin_auth_v1", "true");
-        setAdminEmailInput("");
-        setAdminPinInput("");
-        setAdminError(null);
-      } else {
-        const wrongMsg = lang === "ar" 
-          ? "❌ البريد الإلكتروني أو رمز المرور غير مصرح به. هذه اللوحة تظهر للمشرف ومبتكر الدليل مريم فقط!" 
-          : "❌ Unauthorized access. This terminal is strictly available for admin user: marimp0o9i8@gmail.com";
-        setAdminError(wrongMsg);
+      setIsAdminAuthenticated(false);
+      setAuthError("");
+      setAuthLoading(true);
+      if (!user) {
+        setCurrentStudent(null); setIsAdminAuthenticated(false);
+        setAnswers(INITIAL_ANSWERS); setDaysCompleted(Array(12).fill(false)); setCurrentPage(1);
+        savedSnapshotRef.current = ""; revisionRef.current = 0; syncConflictRef.current = false;
+        setAuthLoading(false); return;
       }
-      setAdminChecking(false);
-    }, 700);
-  };
+      try {
+        const { progress, isOwner } = await apiJson<{ progress: any; isOwner: boolean }>("/api/me/progress");
+        if (epoch !== authEpochRef.current || firebaseAuth?.currentUser?.uid !== user.uid) return;
+        revisionRef.current = Number.isSafeInteger(progress?.revision) ? progress.revision : 0;
+        syncConflictRef.current = false;
+        savedSnapshotRef.current = JSON.stringify({
+          answers: progress?.answers ? { ...INITIAL_ANSWERS, ...progress.answers } : INITIAL_ANSWERS,
+          daysCompleted: Array.isArray(progress?.daysCompleted) && progress.daysCompleted.length === 12 ? progress.daysCompleted : Array(12).fill(false),
+          currentPage: Number.isInteger(progress?.currentPage) ? progress.currentPage : 1
+        });
+        setAnswers(progress?.answers ? { ...INITIAL_ANSWERS, ...progress.answers } : INITIAL_ANSWERS);
+        setDaysCompleted(Array.isArray(progress?.daysCompleted) && progress.daysCompleted.length === 12 ? progress.daysCompleted : Array(12).fill(false));
+        setCurrentPage(Number.isInteger(progress?.currentPage) ? progress.currentPage : 1);
+        setCurrentStudent({ uid: user.uid, email: user.email || "", name: user.displayName || user.email?.split("@")[0] || "طالب", tier: "عضو", demo: false });
+        setIsAdminAuthenticated(isOwner === true);
+        setProgressHydrated(true);
+      } catch (error: any) {
+        if (epoch !== authEpochRef.current) return;
+        setCurrentStudent(null); setIsAdminAuthenticated(false);
+        const message = error.message || "تعذر تحميل الحساب. لن نكتب فوق بياناتك.";
+        await signOut(firebaseAuth).catch(() => {});
+        setAuthError(message);
+      } finally {
+        if (epoch === authEpochRef.current) setAuthLoading(false);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
 
-  const handleAdminLockSession = () => {
-    setIsAdminAuthenticated(false);
-    localStorage.setItem("digital_guide_admin_auth_v1", "false");
+  const logStudentActivity = (_actionText: string) => {
+    // Last authenticated contact is stored server-side; no fabricated local user ledger.
   };
+  const handleStudentLoginSuccess = (studentData: any) => {
+    if (!import.meta.env.DEV || import.meta.env.VITE_ENABLE_DEMO !== "true" || !studentData?.demo) return;
+    setAnswers(INITIAL_ANSWERS); setDaysCompleted(Array(12).fill(false)); setCurrentPage(1);
+    setIsAdminAuthenticated(false); setCurrentStudent(studentData); setProgressHydrated(false);
+  };
+  const handleStudentLogout = async () => {
+    if (currentStudent?.demo) {
+      setCurrentStudent(null); setAnswers(INITIAL_ANSWERS); setDaysCompleted(Array(12).fill(false));
+      return;
+    }
+    if (firebaseAuth && currentStudent?.uid && progressHydrated) {
+      if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
+      try { await saveProgressNow(currentStudent.uid, latestDraftRef.current); }
+      catch (error: any) { window.alert(error.message + " — بقيت الجلسة مفتوحة لحماية المسودة."); return; }
+    }
+    if (firebaseAuth) await signOut(firebaseAuth);
+  };
+  const handleAdminLockSession = () => setActivePanel("dashboard");
 
   // Get current active translation dictionary object safely
   const t = METADATA_TRANSLATIONS[lang] || METADATA_TRANSLATIONS.ar;
 
-  // Save current page state
-  const handleSetCurrentPage = (page: number) => {
-    setCurrentPage(page);
-    try {
-      localStorage.setItem(LOCAL_STORAGE_KEY_PAGE, String(page));
-    } catch (e) {
-      console.warn("Could not save page number to localStorage", e);
-    }
-  };
-
-  // Persists answers to localStorage when updated
+  const handleSetCurrentPage = (page: number) => setCurrentPage(page);
   useEffect(() => {
-    try {
-      localStorage.setItem(LOCAL_STORAGE_KEY_ANSWERS, JSON.stringify(answers));
-    } catch (e) {
-      console.warn("Could not save answers to localStorage", e);
-    }
-  }, [answers]);
-
-  // Persists days Completed state to localStorage when updated
-  useEffect(() => {
-    try {
-      localStorage.setItem(LOCAL_STORAGE_KEY_DAYS, JSON.stringify(daysCompleted));
-    } catch (e) {
-      console.warn("Could not save days Completed status to localStorage", e);
-    }
-  }, [daysCompleted]);
+    if (!currentStudent?.uid || currentStudent.demo || !progressHydrated || syncConflictRef.current) return;
+    if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
+    const uid = currentStudent.uid;
+    const snapshot = { answers, daysCompleted, currentPage };
+    saveTimerRef.current = window.setTimeout(() => {
+      void saveProgressNow(uid, snapshot).catch(() => {});
+    }, 900);
+    return () => {
+      if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
+    };
+  }, [answers, daysCompleted, currentPage, currentStudent?.uid, progressHydrated]);
 
   // Day timeline completion toggle
   const toggleDayCompleted = (dayIndex: number) => {
@@ -331,13 +270,7 @@ export default function App() {
     setAnswers(INITIAL_ANSWERS);
     setDaysCompleted(Array(12).fill(false));
     setCurrentPage(1);
-    try {
-      localStorage.removeItem(LOCAL_STORAGE_KEY_ANSWERS);
-      localStorage.removeItem(LOCAL_STORAGE_KEY_DAYS);
-      localStorage.removeItem(LOCAL_STORAGE_KEY_PAGE);
-    } catch {
-      // safe fallback
-    }
+    // Server-side progress persistence handles the reset.
   };
 
   const daysCompletedCount = daysCompleted.filter(Boolean).length;
@@ -786,11 +719,20 @@ export default function App() {
             </div>
           )}
 
-          {currentStudent === null && activePanel !== "admin" ? (
+          {authLoading && <p role="status" className="p-4 bg-white rounded-lg">جارٍ التحقق من الجلسة واسترجاع تقدمك...</p>}
+          {authError && <p role="alert" className="p-4 bg-red-50 text-red-800 rounded-lg">{authError}</p>}
+          {currentStudent && isAdminAuthenticated && legacyAvailable && (
+            <button type="button" onClick={importLegacyOwnerDraft} className="mb-3 p-2 rounded-xl border border-amber-300 bg-amber-50 text-amber-950 text-xs">
+              استيراد مسودة المتصفح القديمة إلى حساب المالكة (اختياري — النسخة القديمة محفوظة)
+            </button>
+          )}
+          {importNotice && <p role="status" className="mb-2 text-xs text-amber-800">{importNotice}</p>}
+          {currentStudent && !currentStudent.demo && <p role="status" className="mb-2 text-xs text-slate-500">{saveState === "error" ? "تعذر الحفظ السحابي؛ لا تغلقي الصفحة قبل حل المشكلة." : saveState === "saving" ? "جارٍ حفظ تقدمك..." : saveState === "saved" ? "تم حفظ التقدم على الخادم." : ""}</p>}
+          {currentStudent === null && activePanel !== "admin" && !authLoading ? (
             <StudentLogin onLoginSuccess={handleStudentLoginSuccess} lang={lang} />
           ) : (
             <>
-              {activePanel === "dashboard" && (
+              {currentStudent !== null && activePanel === "dashboard" && (
                 <Dashboard
                   answers={answers}
                   daysCompletedCount={daysCompletedCount}
@@ -920,92 +862,15 @@ export default function App() {
           )}
 
           {activePanel === "admin" && (
-            !isAdminAuthenticated ? (
-              <div className="max-w-2xl mx-auto bg-white border border-slate-100 rounded-3xl p-6 md:p-8 shadow-md space-y-6 text-right mt-6" style={{ direction: "rtl" }}>
-                <div className="w-16 h-16 bg-amber-50 text-[#f2a900] border border-[#f2a900]/30 rounded-2xl flex items-center justify-center mx-auto animate-pulse">
-                  <Lock className="w-8 h-8 stroke-1.5" />
-                </div>
-                <div className="text-center space-y-2 select-none">
-                  <h3 className="text-lg md:text-xl font-black text-[#0b1d33]">{t.adminLockedTitle}</h3>
-                  <p className="text-slate-500 text-xs sm:text-sm leading-relaxed max-w-lg mx-auto">{t.adminLockedSub}</p>
-                </div>
-
-                {adminError && (
-                  <div className="bg-rose-50 border border-rose-250 text-rose-700 p-3.5 rounded-xl text-xs font-bold leading-relaxed text-right">
-                    {adminError}
-                  </div>
-                )}
-
-                <form onSubmit={handleAdminUnlockSubmit} className="space-y-4 pt-1">
-                  <div className="space-y-1.5 text-right">
-                    <label className="text-xs font-bold text-slate-700 block">{t.adminEmail}</label>
-                    <input 
-                      type="email" 
-                      required
-                      placeholder="marimp0o9i8@gmail.com"
-                      value={adminEmailInput}
-                      onChange={(e) => setAdminEmailInput(e.target.value)}
-                      className="w-full p-2.5 sm:p-3 border rounded-xl outline-none focus:border-[#0b1d33] text-left text-xs sm:text-sm font-medium"
-                    />
-                  </div>
-
-                  <div className="space-y-1.5 text-right">
-                    <label className="text-xs font-bold text-slate-700 block">{t.adminPIN}</label>
-                    <input 
-                      type="password" 
-                      required
-                      placeholder="••••"
-                      value={adminPinInput}
-                      onChange={(e) => setAdminPinInput(e.target.value)}
-                      className="w-full p-2.5 sm:p-3 border rounded-xl outline-none focus:border-[#0b1d33] text-center font-mono text-sm"
-                      maxLength={6}
-                    />
-                  </div>
-
-                  <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 text-[10.5px] sm:text-xs text-slate-550 font-bold leading-normal">
-                    {t.adminPINHint}
-                  </div>
-
-                  <button
-                    type="submit"
-                    disabled={adminChecking}
-                    className="w-full py-3 bg-[#0b1d33] hover:bg-slate-800 text-[#f2a900] font-black text-xs sm:text-sm rounded-xl transition cursor-pointer flex items-center justify-center gap-2 shadow"
-                  >
-                    {adminChecking ? (
-                      <>
-                        <div className="animate-spin border-2 border-t-transparent border-[#f2a900] rounded-full w-4 h-4" />
-                        <span>{t.adminUnlockProcessing}</span>
-                      </>
-                    ) : (
-                      <span>{t.adminUnlockBtn}</span>
-                    )}
-                  </button>
-                </form>
+            !currentStudent || !isAdminAuthenticated ? (
+              <div role="alert" className="p-6 bg-amber-50 border border-amber-200 rounded-2xl text-amber-950 text-sm">
+                لوحة المالكة محمية على الخادم باستخدام Firebase UID. سجلي الدخول بحساب المالكة المعرّف على الخادم؛ لا يوجد رمز PIN في المتصفح.
               </div>
-            ) : (
-              <div className="space-y-4">
-                <div className="flex justify-between items-center bg-white border border-slate-100 p-3.5 px-4 rounded-xl shadow-xs select-none">
-                  <button
-                    onClick={handleAdminLockSession}
-                    className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs rounded-xl border border-rose-200 transition cursor-pointer flex items-center gap-1.5"
-                  >
-                    <Lock className="w-3.5 h-3.5" />
-                    <span>{t.adminLogoutBtn}</span>
-                  </button>
-                  <span className="text-xs font-black text-emerald-600 flex items-center gap-1.5" style={{ direction: "rtl" }}>
-                    <span>{t.adminSuccessUnlocked}</span>
-                    <span className="w-2 h-2 bg-emerald-500 rounded-full animate-ping" />
-                  </span>
-                </div>
-
-                <AdminSuite
-                  answers={answers}
-                  daysCompletedCount={daysCompletedCount}
-                  onNavigateToPanel={handlePanelChange}
-                  lang={lang}
-                />
-              </div>
-            )
+            ) : <div className="space-y-4">
+              <button onClick={handleAdminLockSession} className="rounded-xl border px-4 py-2 bg-white">العودة للرئيسية</button>
+              <AdminOverview />
+              <AdminSuite answers={answers} daysCompletedCount={daysCompletedCount} onNavigateToPanel={handlePanelChange} lang={lang} />
+            </div>
           )}
         </main>
       </div>
