@@ -88,20 +88,29 @@ export function installSecureApi(app: Express) {
   });
 
   app.put("/api/me/progress", async (req: AuthRequest, res) => {
-    const { answers, daysCompleted, currentPage } = req.body || {};
+    const { answers, daysCompleted, currentPage, revision } = req.body || {};
     const validAnswers = answers && typeof answers === "object" && !Array.isArray(answers) &&
       Object.keys(answers).length <= 60 &&
       Object.entries(answers).every(([key, value]) =>
         /^u[1-5][A-Za-z0-9_]{1,60}$/.test(key) && (typeof value === "boolean" || (typeof value === "string" && value.length <= 3000)));
     if (!validAnswers || !Array.isArray(daysCompleted) || daysCompleted.length !== 12 ||
       !daysCompleted.every((day: any) => typeof day === "boolean") ||
-      !Number.isInteger(currentPage) || currentPage < 1 || currentPage > 33)
+      !Number.isInteger(currentPage) || currentPage < 1 || currentPage > 33 ||
+      !Number.isSafeInteger(revision) || revision < 0)
       return clientError(res, 400, "بيانات التقدم غير صالحة.");
     try {
-      await getFirestore().collection("progress").doc(req.verifiedUser!.uid).set({
-        answers, daysCompleted, currentPage, updatedAt: FieldValue.serverTimestamp()
-      }, { merge: true });
-      return res.json({ saved: true });
+      const doc = getFirestore().collection("progress").doc(req.verifiedUser!.uid);
+      const outcome = await getFirestore().runTransaction(async tx => {
+        const previous = await tx.get(doc);
+        const currentRevision = previous.exists ? Number(previous.get("revision") || 0) : 0;
+        if (currentRevision !== revision) return { conflict: true, currentRevision };
+        const nextRevision = currentRevision + 1;
+        tx.set(doc, { answers, daysCompleted, currentPage,
+          revision: nextRevision, updatedAt: FieldValue.serverTimestamp() });
+        return { conflict: false, revision: nextRevision };
+      });
+      if (outcome.conflict) return clientError(res, 409, "تغيّرت المسودة في جلسة أخرى؛ لن نستبدلها تلقائياً. أعيدي تحميل الحساب بعد حفظ نسخة من تعديلاتك.");
+      return res.json({ saved: true, revision: outcome.revision });
     } catch (e: any) {
       console.error("Save progress error:", e?.message);
       return clientError(res, 503, "فشل حفظ التقدم على الخادم.");
