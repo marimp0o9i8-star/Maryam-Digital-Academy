@@ -113,6 +113,7 @@ export default function App() {
 
   const saveProgressNow = async (uid: string, snapshot: { answers: WorksheetAnswers; daysCompleted: boolean[]; currentPage: number }) => {
     const data = JSON.stringify(snapshot);
+    const ownerEpoch = authEpochRef.current;
     const task = saveQueueRef.current.catch(() => {}).then(async () => {
       if (savedSnapshotRef.current === data) return;
       if (syncConflictRef.current) throw new Error("هناك تعارض بين جلسات العمل؛ لن نستبدل المسودة دون مراجعة.");
@@ -129,17 +130,19 @@ export default function App() {
         if (response.status === 409) syncConflictRef.current = true;
         throw new Error(result.error || "تعذر الحفظ على الخادم.");
       }
-      revisionRef.current = result.revision;
-      savedSnapshotRef.current = data;
+      if (ownerEpoch === authEpochRef.current && firebaseAuth?.currentUser?.uid === uid) {
+        revisionRef.current = result.revision;
+        savedSnapshotRef.current = data;
+      }
     });
     saveQueueRef.current = task;
-    setSaveState("saving");
+    if (ownerEpoch === authEpochRef.current) setSaveState("saving");
     try {
       await task;
       if (firebaseAuth?.currentUser?.uid === uid) setSaveState("saved");
     } catch (error: any) {
       console.error("Progress save failed:", error);
-      setSaveState("error");
+      if (ownerEpoch === authEpochRef.current) setSaveState("error");
       throw error;
     }
   };
