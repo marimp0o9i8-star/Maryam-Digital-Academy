@@ -26,7 +26,7 @@ test("public health; private endpoints fail closed without a verified session", 
   const health = await (await fetch(`${base}/api/health`)).json();
   assert.equal(health.firebaseConfigured, false);
   assert.equal(health.aiConfigured, false);
-  for (const path of ["/api/me/progress", "/api/admin/summary"]) {
+  for (const path of ["/api/me/progress", "/api/admin/summary", "/api/admin/connection-check"]) {
     const response = await fetch(base + path);
     assert.equal(response.status, 401, path);
   }
