@@ -10,7 +10,7 @@
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
     "test": "node --test tests/unauthorized.test.mjs",
-    "test:emulator": "firebase emulators:exec --only auth,firestore --project demo-maryam-academy 'node --test tests/firebase-emulator.test.mjs'"
+    "test:emulator": "firebase emulators:exec --only auth,firestore --project demo-maryam-academy 'node --test --test-concurrency=1 tests/firebase-emulator.test.mjs tests/browser-e2e.test.mjs'"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
@@ -35,6 +35,7 @@
     "typescript": "~5.8.2",
     "vite": "^6.2.3",
     "@types/express": "^4.17.21",
-    "firebase-tools": "^14.0.0"
+    "firebase-tools": "^14.0.0",
+    "playwright": "^1.55.0"
   }
 }
