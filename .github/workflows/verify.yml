@@ -1,0 +1,48 @@
+name: Verify safely
+on:
+  push:
+    branches: [fix/real-auth-storage-security-v1]
+  pull_request:
+    branches: [main]
+concurrency:
+  group: engineering-verify-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --no-audit --no-fund
+      - run: npm run lint
+      - run: npm run build
+        env:
+          VITE_FIREBASE_API_KEY: emulator-only-public-key
+          VITE_FIREBASE_AUTH_DOMAIN: demo-maryam-academy.firebaseapp.com
+          VITE_FIREBASE_PROJECT_ID: demo-maryam-academy
+          VITE_FIREBASE_APP_ID: emulator-only-app-id
+          VITE_FIREBASE_AUTH_EMULATOR_URL: http://127.0.0.1:9099
+      - run: npm test
+      - name: Validate staging preflight syntax without network calls
+        run: node --check scripts/staging-smoke.mjs
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/firebase/emulators
+          key: firebase-emulators-v1-${{ runner.os }}
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-v1-${{ runner.os }}
+      - name: Install local headless browser
+        run: npx playwright install --with-deps chromium
+      - name: Firebase Auth / Firestore isolated integration
+        run: npm run test:emulator

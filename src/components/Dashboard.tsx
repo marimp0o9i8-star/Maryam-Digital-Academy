@@ -1,7 +1,6 @@
 import React from "react";
 import { BookOpen, CheckSquare, Award, Sparkles, MessageCircle, ArrowRight } from "lucide-react";
 import { WorksheetAnswers } from "../types";
-import SocialProofShelf from "./SocialProofShelf";
 
 interface DashboardProps {
   answers: WorksheetAnswers;
@@ -284,7 +283,7 @@ export default function Dashboard({
 
       {/* Social proof shelf at the bottom of the dashboard */}
       <div className="pt-4">
-        <SocialProofShelf lang={lang} />
+        
       </div>
     </div>
   );

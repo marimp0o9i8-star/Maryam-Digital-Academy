@@ -1,0 +1,165 @@
+import type { Express, Request, Response, NextFunction } from "express";
+import { applicationDefault, getApps, initializeApp } from "firebase-admin/app";
+import { getAuth, type DecodedIdToken } from "firebase-admin/auth";
+import { getFirestore, FieldValue } from "firebase-admin/firestore";
+
+type AuthRequest = Request & { verifiedUser?: DecodedIdToken };
+const buckets = new Map<string, { start: number; count: number }>();
+const MAX_CALLS_PER_MINUTE = 30;
+
+function configured(): boolean { return !!process.env.FIREBASE_PROJECT_ID?.trim() && !!process.env.FIRESTORE_DATABASE_ID?.trim(); }
+function academyDb() {
+  // Never silently point a named-database app at (default), or an unrelated application's collections.
+  const id = process.env.FIRESTORE_DATABASE_ID?.trim();
+  if (!id) throw new Error("FIRESTORE_DATABASE_ID must be explicitly configured.");
+  bootstrap();
+  const app = getApps()[0];
+  return id === "(default)" ? getFirestore(app) : getFirestore(app, id);
+}
+const academyCollection = (name: "users" | "progress") => academyDb().collection("apps").doc("maryam-academy").collection(name);
+function bootstrap() {
+  if (!configured()) throw new Error("FIREBASE_PROJECT_ID and FIRESTORE_DATABASE_ID must be configured.");
+  // Emulator tests use local unsigned tokens and never load production credentials.
+  // Never allow emulator endpoints in a production Cloud Run deployment.
+  const emulated = !!(process.env.FIREBASE_AUTH_EMULATOR_HOST || process.env.FIRESTORE_EMULATOR_HOST);
+  if (emulated && process.env.NODE_ENV === "production" && process.env.ALLOW_FIREBASE_EMULATORS_IN_CI !== "true") {
+    throw new Error("Firebase emulator configuration is forbidden in production.");
+  }
+  if (!getApps().length) initializeApp(emulated
+    ? { projectId: process.env.FIREBASE_PROJECT_ID }
+    : { credential: applicationDefault(), projectId: process.env.FIREBASE_PROJECT_ID });
+}
+function clientError(res: Response, code: number, message: string) { return res.status(code).json({ error: message }); }
+
+async function requireUser(req: AuthRequest, res: Response, next: NextFunction) {
+  const bearer = /^Bearer (.+)$/i.exec(req.get("Authorization") || "");
+  if (!bearer) return clientError(res, 401, "تسجيل دخول Firebase مطلوب.");
+  if (!configured()) return clientError(res, 503, "إعداد Firebase على الخادم غير مكتمل.");
+  try {
+    bootstrap();
+    const decoded = await getAuth().verifyIdToken(bearer[1], true);
+    const now = Date.now();
+    // Best-effort per-instance budget; use central rate limiting before a high-traffic launch.
+    if (buckets.size > 10000) buckets.clear();
+    const old = buckets.get(decoded.uid);
+    const entry = old && now - old.start < 60000 ? old : { start: now, count: 0 };
+    entry.count++;
+    buckets.set(decoded.uid, entry);
+    if (entry.count > MAX_CALLS_PER_MINUTE) return clientError(res, 429, "طلبات كثيرة؛ أعيدي المحاولة بعد دقيقة.");
+    req.verifiedUser = decoded;
+    return next();
+  } catch (err: any) {
+    if (err?.code?.startsWith("auth/")) return clientError(res, 401, "انتهت جلسة الدخول؛ سجلي الدخول مجدداً.");
+    console.error("Authentication service error:", err?.message);
+    return clientError(res, 503, "خدمة التحقق غير متاحة حالياً.");
+  }
+}
+function isOwner(user: DecodedIdToken): boolean {
+  return !!process.env.OWNER_UID?.trim() && user.uid === process.env.OWNER_UID!.trim();
+}
+function toDate(value: any): string | null {
+  return value && typeof value.toDate === "function" ? value.toDate().toISOString() : null;
+}
+
+export function installSecureApi(app: Express) {
+  app.get("/api/health", (_req, res) => res.json({
+    ok: true, firebaseConfigured: configured(), aiConfigured: !!process.env.GEMINI_API_KEY
+  }));
+  app.use("/api", requireUser);
+  // By default only the owner can incur AI charges. Explicitly enable public AI after
+  // setting provider quotas and a daily project budget.
+  app.use(["/api/coach/chat", "/api/translate", "/api/ai-tool"], (req: AuthRequest, res, next) => {
+    if (process.env.AI_PUBLIC_ENABLED !== "true" && !isOwner(req.verifiedUser!)) {
+      return clientError(res, 403, "أدوات الذكاء الاصطناعي غير مفعلة للحسابات العامة حالياً.");
+    }
+    if (!process.env.GEMINI_API_KEY?.trim()) {
+      return clientError(res, 503, "Gemini غير مفعّل على الخادم.");
+    }
+    return next();
+  });
+
+  app.get("/api/me/progress", async (req: AuthRequest, res) => {
+    try {
+      const user = req.verifiedUser!;
+      const profile = academyCollection("users").doc(user.uid);
+      await profile.set({
+        name: user.name || user.email?.split("@")[0] || "",
+        email: user.email || "",
+        lastSeen: FieldValue.serverTimestamp(),
+      }, { merge: true });
+      const snapshot = await academyCollection("progress").doc(user.uid).get();
+      return res.json({ progress: snapshot.exists ? snapshot.data() : null, isOwner: isOwner(user) });
+    } catch (e: any) {
+      console.error("Load progress error:", e?.message);
+      return clientError(res, 503, "تعذر تحميل التقدم؛ لن تتم الكتابة فوق بياناتك.");
+    }
+  });
+
+  app.put("/api/me/progress", async (req: AuthRequest, res) => {
+    const { answers, daysCompleted, currentPage, revision } = req.body || {};
+    const validAnswers = answers && typeof answers === "object" && !Array.isArray(answers) &&
+      Object.keys(answers).length <= 60 &&
+      Object.entries(answers).every(([key, value]) =>
+        /^u[1-5][A-Za-z0-9_]{1,60}$/.test(key) && (typeof value === "boolean" || (typeof value === "string" && value.length <= 3000)));
+    if (!validAnswers || !Array.isArray(daysCompleted) || daysCompleted.length !== 12 ||
+      !daysCompleted.every((day: any) => typeof day === "boolean") ||
+      !Number.isInteger(currentPage) || currentPage < 1 || currentPage > 33 ||
+      !Number.isSafeInteger(revision) || revision < 0)
+      return clientError(res, 400, "بيانات التقدم غير صالحة.");
+    try {
+      const doc = academyCollection("progress").doc(req.verifiedUser!.uid);
+      const outcome = await academyDb().runTransaction(async tx => {
+        const previous = await tx.get(doc);
+        const currentRevision = previous.exists ? Number(previous.get("revision") || 0) : 0;
+        if (currentRevision !== revision) return { conflict: true, currentRevision };
+        const nextRevision = currentRevision + 1;
+        tx.set(doc, { answers, daysCompleted, currentPage,
+          revision: nextRevision, updatedAt: FieldValue.serverTimestamp() });
+        return { conflict: false, revision: nextRevision };
+      });
+      if (outcome.conflict) return clientError(res, 409, "تغيّرت المسودة في جلسة أخرى؛ لن نستبدلها تلقائياً. أعيدي تحميل الحساب بعد حفظ نسخة من تعديلاتك.");
+      return res.json({ saved: true, revision: outcome.revision });
+    } catch (e: any) {
+      console.error("Save progress error:", e?.message);
+      return clientError(res, 503, "فشل حفظ التقدم على الخادم.");
+    }
+  });
+
+  // Owner-only, read-only connection diagnostic. Admin SDK bypasses Firestore rules;
+  // never report this probe as proof that client-side security rules are correct.
+  app.get("/api/admin/connection-check", async (req: AuthRequest, res) => {
+    if (!isOwner(req.verifiedUser!)) return clientError(res, 403, "غير مصرح.");
+    try {
+      const db = academyDb();
+      await db.listCollections(); // Metadata only. Never read or mutate user documents.
+      await getAuth().getUser(req.verifiedUser!.uid);
+      return res.json({
+        connected: true,
+        projectId: process.env.FIREBASE_PROJECT_ID,
+        databaseId: process.env.FIRESTORE_DATABASE_ID,
+        authVerified: true,
+        databaseReadableByServer: true,
+        securityRulesVerified: false,
+        note: "Admin SDK يتجاوز قواعد Firestore؛ يجب مراجعة القواعد بصورة منفصلة."
+      });
+    } catch (error: any) {
+      console.error("Owner connection check failed:", error?.code || error?.message);
+      return clientError(res, 503, "تعذر التحقق من الاتصال بالمشروع أو قاعدة البيانات.");
+    }
+  });
+
+  app.get("/api/admin/summary", async (req: AuthRequest, res) => {
+    if (!isOwner(req.verifiedUser!)) return clientError(res, 403, "غير مصرح.");
+    try {
+      const snapshot = await academyCollection("users").limit(100).get();
+      const profiles = snapshot.docs.map(doc => ({
+        uid: doc.id, name: doc.get("name") || "", email: doc.get("email") || "",
+        lastSeen: toDate(doc.get("lastSeen"))
+      }));
+      return res.json({ students: profiles.length, profiles, limited: snapshot.size === 100 });
+    } catch (e: any) {
+      console.error("Admin summary error:", e?.message);
+      return clientError(res, 503, "تعذر استرجاع بيانات العضويات.");
+    }
+  });
+}
